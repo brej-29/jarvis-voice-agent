@@ -1,0 +1,32 @@
+name: jarvis_voice_agent
+description: "Jarvis-style push-to-talk voice assistant using Flutter and a FastAPI backend."
+publish_to: "none"
+
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.6
+
+  # Voice & audio
+  speech_to_text: ^6.5.1
+  flutter_tts: ^3.8.6
+
+  # Networking
+  http: ^1.2.0
+
+  # Permissions
+  permission_handler: ^11.3.0
+
+  # State management
+  provider: ^6.1.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.1
+
+flutter:
+  uses-material-design: true
