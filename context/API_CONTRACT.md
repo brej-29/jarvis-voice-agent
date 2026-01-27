@@ -137,8 +137,9 @@ The backend will validate incoming payloads using Pydantic models that mirror th
 
   - Fields:
     - `model` (string)
-      - Name of the Ollama model used (e.g., `"mistral"`).
-      - Derived from backend configuration.
+      - Name of the underlying model used, derived from backend configuration:
+        - For `LLM_PROVIDER=ollama`: the Ollama model name (e.g., `"mistral"`).
+        - For `LLM_PROVIDER=llamacpp`: the TinyLlama GGUF file name (e.g., `tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf`).
 
     - `latency_ms` (integer)
       - Total time (in milliseconds) measured on the backend for processing the request, including:
@@ -152,6 +153,7 @@ The backend will validate incoming payloads using Pydantic models that mirror th
     - `[]` — no known errors.
     - `["ollama_connection_error"]`
     - `["ollama_client_error"]`
+    - `["llm_provider_error"]` (generic error from the configured LLM provider, e.g. TinyLlama in demo mode)
     - `["tool_routing_json_error"]`
     - `["tool_execution_error"]`
     - `["unexpected_server_error"]`

@@ -23,7 +23,9 @@ This document describes the high-level architecture for the **Jarvis Voice Agent
   - `/chat` endpoint for conversational requests.
   - Pydantic schemas for input/output validation.
   - Centralized configuration & logging.
-  - Integration with **Ollama** via its REST API.
+  - Integration with local LLM providers:
+    - **Ollama** via its REST API (default, `LLM_PROVIDER=ollama`).
+    - **LlamaCpp** TinyLlama GGUF model for CPU-only demos (e.g., HF Spaces, `LLM_PROVIDER=llamacpp`).
 
 - **Local LLM (Ollama)**
   - Runs on the same machine as the backend.
@@ -129,7 +131,9 @@ The system is designed so that swapping STT/TTS engines later (e.g., adding a lo
 
 ---
 
-## Backend ↔ Ollama Integration
+## Backend ↔ LLM Providers
+
+When `LLM_PROVIDER=ollama` (default, local-first):
 
 - **Base URL**
   - Configured via `OLLAMA_BASE_URL` environment variable.
@@ -157,6 +161,15 @@ The backend sends:
   - The Ollama client performs a small number of retries on network errors.
   - If the client cannot reach Ollama, it raises a typed exception that the `/chat` router converts into a **friendly fallback reply**.
 
+When `LLM_PROVIDER=llamacpp` (HF Spaces / demo mode):
+
+- The backend uses a TinyLlama GGUF model loaded via `llama-cpp-python`.
+- Weights are downloaded from Hugging Face Hub (`LLAMACPP_MODEL_REPO` / `LLAMACPP_MODEL_FILE`) and cached.
+- A moderate context window (`LLAMACPP_CONTEXT_LENGTH`, default `2048`) keeps CPU usage reasonable.
+- Initialization happens on startup (warmup), and failures are surfaced as:
+  - Logged exceptions with request IDs on the server.
+  - Friendly, non-leaky “demo degraded” messages from `/chat`.
+
 ---
 
 ## Data & State
@@ -179,8 +192,13 @@ The backend sends:
 - **Backend configuration** (from environment variables):
   - `APP_ENV` – `local` (default), `dev`, or `prod`.
   - `LOG_LEVEL` – `DEBUG`, `INFO` (default), `WARNING`, `ERROR`, `CRITICAL`.
+  - `LLM_PROVIDER` – selects the local LLM backend:
+    - `ollama` (default) – local Ollama instance.
+    - `llamacpp` – TinyLlama GGUF via `llama-cpp-python` (CPU-only demos).
   - `OLLAMA_BASE_URL` – base URL of Ollama (default `http://localhost:11434`).
   - `OLLAMA_MODEL` – default model name (e.g., `mistral`).
+  - `LLAMACPP_MODEL_REPO` / `LLAMACPP_MODEL_FILE` – GGUF model location on Hugging Face.
+  - `LLAMACPP_CONTEXT_LENGTH` / `LLAMACPP_MAX_TOKENS` – context window and max tokens for TinyLlama.
   - `REQUEST_TIMEOUT_S` – HTTP timeout in seconds (default `60`).
   - `CORS_ALLOW_ORIGINS` – comma-separated list of origins allowed for local dev.
 

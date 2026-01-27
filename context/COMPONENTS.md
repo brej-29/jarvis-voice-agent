@@ -89,7 +89,11 @@ The backend’s `prompt_builder` reads small, curated excerpts from `GOAL.md` an
 
 - `backend/app/core/config.py`
   - Reads and validates environment variables:
-    - `APP_ENV`, `LOG_LEVEL`, `OLLAMA_BASE_URL`, `OLLAMA_MODEL`, `REQUEST_TIMEOUT_S`, and `CORS_ALLOW_ORIGINS`.
+    - `APP_ENV`, `LOG_LEVEL`
+    - `LLM_PROVIDER` (`ollama` or `llamacpp`)
+    - `OLLAMA_BASE_URL`, `OLLAMA_MODEL`
+    - `LLAMACPP_MODEL_REPO`, `LLAMACPP_MODEL_FILE`, `LLAMACPP_CONTEXT_LENGTH`, `LLAMACPP_MAX_TOKENS`
+    - `REQUEST_TIMEOUT_S`, and `CORS_ALLOW_ORIGINS`.
   - Provides a `settings` object used across the backend.
   - Ensures sane defaults and logs warnings for invalid configuration.
 
@@ -121,6 +125,15 @@ The backend’s `prompt_builder` reads small, curated excerpts from `GOAL.md` an
     - Timeouts and network errors with small retry logic.
     - Typed exceptions (`OllamaClientError`, etc.) for the router to handle.
   - Never returns raw HTTP errors directly to the client.
+
+- `backend/app/services/llamacpp_client.py`
+  - CPU-only LlamaCpp provider for TinyLlama GGUF models.
+  - Used when `LLM_PROVIDER=llamacpp` (e.g., Hugging Face Spaces demos).
+  - Handles:
+    - Downloading GGUF weights via `huggingface_hub.hf_hub_download`.
+    - Initializing `llama-cpp-python` with a moderate context window.
+    - Threaded inference with robust error handling (`LlamaCppClientError`, etc.).
+  - Returns a plain string reply, mirroring the Ollama client interface.
 
 - `backend/app/services/prompt_builder.py`
   - Reads excerpts from `context/GOAL.md` and `context/COMPONENTS.md`.

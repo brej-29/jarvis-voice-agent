@@ -19,6 +19,7 @@ from app.services.ollama_client import (
     OllamaClientError,
     OllamaConnectionError,
 )
+from app.services.llamacpp_client import LlamaCppClientError, chat as llamacpp_chat
 from app.services.prompt_builder import build_system_prompt
 from app.services.reminder import ReminderParseError, parse_natural_datetime
 from app.services.weather import WeatherError, WeatherLookupError, get_weather_description
@@ -27,6 +28,18 @@ logger = get_logger(__name__)
 router = APIRouter()
 
 _ollama_client = OllamaClient()
+
+
+async def _provider_chat(messages: List[Dict[str, str]]) -> str:
+    """
+    Call the configured LLM provider (Ollama or LlamaCpp) with a list of messages.
+
+    This abstracts over provider selection so the rest of the router does not need
+    to care which backend is in use.
+    """
+    if settings.llm_provider == "llamacpp":
+        return await llamacpp_chat(messages)
+    return await _ollama_client.chat(messages=messages)
 
 
 def _build_tool_router_system_prompt() -> str:
@@ -72,12 +85,13 @@ You MUST respond with ONLY valid JSON, no markdown, no extra text, with this sha
 
 async def _call_router_model(messages: List[Dict[str, str]]) -> str:
     """
-    Call Ollama to obtain a raw JSON string representing ToolRouterResult.
+    Call the configured LLM provider to obtain a raw JSON string representing
+    ToolRouterResult.
     """
     system_prompt = _build_tool_router_system_prompt()
     routed_messages: List[Dict[str, str]] = [{"role": "system", "content": system_prompt}]
     routed_messages.extend(messages)
-    return await _ollama_client.chat(messages=routed_messages)
+    return await _provider_chat(messages=routed_messages)
 
 
 def _parse_tool_router_result(raw: str) -> ToolRouterResult:
@@ -109,7 +123,7 @@ async def _retry_fix_json(raw: str) -> Optional[ToolRouterResult]:
     )
 
     try:
-        fixed_raw = await _ollama_client.chat(
+        fixed_raw = await _provider_chat(
             messages=[
                 {"role": "system", "content": _build_tool_router_system_prompt()},
                 {"role": "user", "content": fix_prompt},
@@ -226,13 +240,16 @@ async def _handle_tool_call(
     qa_messages.extend(messages)
 
     try:
-        return await _ollama_client.chat(messages=qa_messages)
-    except OllamaClientError as exc:
-        logger.error("GENERAL_QA model call failed: %s", exc)
-        return (
-            "I ran into an error while trying to answer that question. "
-            "Please try again in a moment."
-        )
+        return await _provider_chat(messages=qa_messages)
+    except (OllamaConnectionError, OllamaClientError) as exc:
+        logger.error("GENERAL_QA Ollama model call failed: %s", exc)
+    except LlamaCppClientError as exc:
+        logger.error("GENERAL_QA LlamaCpp model call failed: %s", exc)
+
+    return (
+        "I ran into an error while trying to answer that question. "
+        "Please try again in a moment."
+    )
 
 
 @router.post("/chat", response_model=ChatResponse, tags=["chat"])
@@ -276,6 +293,18 @@ async def chat(request: Request, payload: ChatRequest) -> ChatResponse:
             "I am currently unable to reach the local language model service. "
             "Please ensure Ollama is running and try again."
         )
+    except LlamaCppClientError as exc:
+        logger.warning(
+            "LlamaCpp error during tool routing for request_id=%s, session_id=%s: %s",
+            request_id,
+            payload.session_id,
+            exc,
+        )
+        errors.append("llm_provider_error")
+        reply_text = (
+            "This demo is currently degraded because the local TinyLlama model "
+            "could not be used. Please try again in a moment."
+        )
     except Exception as exc:  # JSON parsing or validation error
         logger.warning(
             "Tool routing JSON parse failed for request_id=%s, session_id=%s: %s",
@@ -294,10 +323,10 @@ async def chat(request: Request, payload: ChatRequest) -> ChatResponse:
                 if system_prompt:
                     qa_messages.append({"role": "system", "content": system_prompt})
                 qa_messages.extend(conversation_messages)
-                reply_text = await _ollama_client.chat(messages=qa_messages)
+                reply_text = await _provider_chat(messages=qa_messages)
             except (OllamaConnectionError, OllamaClientError) as model_exc:
                 logger.warning(
-                    "Fallback GENERAL_QA model call failed for request_id=%s: %s",
+                    "Fallback GENERAL_QA Ollama model call failed for request_id=%s: %s",
                     request_id,
                     model_exc,
                 )
@@ -305,6 +334,17 @@ async def chat(request: Request, payload: ChatRequest) -> ChatResponse:
                 reply_text = (
                     "I am currently unable to generate a response because the local "
                     "language model service is unavailable."
+                )
+            except LlamaCppClientError as model_exc:
+                logger.warning(
+                    "Fallback GENERAL_QA LlamaCpp model call failed for request_id=%s: %s",
+                    request_id,
+                    model_exc,
+                )
+                errors.append("llm_provider_error")
+                reply_text = (
+                    "This demo is currently degraded because the local TinyLlama model "
+                    "could not be used. Please try again later."
                 )
         else:
             tool_result = fixed_result  # type: ignore[unbound-local]
@@ -316,7 +356,7 @@ async def chat(request: Request, payload: ChatRequest) -> ChatResponse:
                 if tool_result.assistant_message:
                     # If the model provided a specific assistant message, prefer it.
                     reply_text = tool_result.assistant_message
-            except Exception as tool_exc:  # noqa: BLE001
+            except Exception:  # noqa: BLE001
                 logger.exception(
                     "Error executing tool after JSON fix for request_id=%s", request_id
                 )
@@ -336,7 +376,7 @@ async def chat(request: Request, payload: ChatRequest) -> ChatResponse:
                 reply_text = await _handle_tool_call(
                     tool_result.tool_call, conversation_messages, actions
                 )
-            except Exception as exc:  # noqa: BLE001
+            except Exception:  # noqa: BLE001
                 logger.exception(
                     "Error executing tool for request_id=%s, session_id=%s",
                     request_id,
@@ -349,7 +389,7 @@ async def chat(request: Request, payload: ChatRequest) -> ChatResponse:
                 )
 
     latency_ms = int((time.perf_counter() - start) * 1000)
-    debug = DebugInfo(model=settings.ollama_model, latency_ms=latency_ms)
+    debug = DebugInfo(model=settings.debug_model_name, latency_ms=latency_ms)
     response = ChatResponse(
         session_id=payload.session_id,
         reply_text=reply_text,
