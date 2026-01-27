@@ -8,6 +8,11 @@ Push-to-talk, Jarvis-style voice assistant built with:
 
 This is **V1** of the project, focused on a single, local voice loop.
 
+For detailed runbooks, see:
+
+- `context/RUN_LOCAL.md` – step-by-step local setup (backend + mobile).
+- `context/DEPLOY_FREE.md` – free deployment options (HF Spaces + Cloudflare tunnel + Android APK).
+
 ---
 
 ## Prerequisites

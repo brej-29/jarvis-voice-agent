@@ -7,8 +7,15 @@ from urllib.parse import urlparse
 
 _DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434"
 _DEFAULT_TIMEOUT_S = 60
+_DEFAULT_LLM_PROVIDER = "ollama"
+_DEFAULT_LLAMACPP_REPO = "TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF"
+_DEFAULT_LLAMACPP_MODEL_FILE = "tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf"
+_DEFAULT_LLAMACPP_CONTEXT_LENGTH = 2048
+_DEFAULT_LLAMACPP_MAX_TOKENS = 256
+
 _VALID_ENVIRONMENTS = {"local", "dev", "prod"}
 _VALID_LOG_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
+_VALID_LLM_PROVIDERS = {"ollama", "llamacpp"}
 
 
 @dataclass
@@ -22,10 +29,40 @@ class Settings:
 
     app_env: str = field(default_factory=lambda: os.getenv("APP_ENV", "local"))
     log_level: str = field(default_factory=lambda: os.getenv("LOG_LEVEL", "INFO"))
+
+    # LLM provider selection
+    # - "ollama"   -> local Ollama instance (default, local-first)
+    # - "llamacpp" -> CPU-only TinyLlama model (for HF Spaces / demos)
+    llm_provider: str = field(
+        default_factory=lambda: os.getenv("LLM_PROVIDER", _DEFAULT_LLM_PROVIDER)
+    )
+
+    # Ollama configuration (used when llm_provider == "ollama")
     ollama_base_url: str = field(
         default_factory=lambda: os.getenv("OLLAMA_BASE_URL", _DEFAULT_OLLAMA_BASE_URL)
     )
     ollama_model: str = field(default_factory=lambda: os.getenv("OLLAMA_MODEL", "mistral"))
+
+    # LlamaCpp configuration (used when llm_provider == "llamacpp")
+    llamacpp_model_repo: str = field(
+        default_factory=lambda: os.getenv("LLAMACPP_MODEL_REPO", _DEFAULT_LLAMACPP_REPO)
+    )
+    llamacpp_model_file: str = field(
+        default_factory=lambda: os.getenv(
+            "LLAMACPP_MODEL_FILE", _DEFAULT_LLAMACPP_MODEL_FILE
+        )
+    )
+    llamacpp_context_length: int = field(
+        default_factory=lambda: int(
+            os.getenv("LLAMACPP_CONTEXT_LENGTH", str(_DEFAULT_LLAMACPP_CONTEXT_LENGTH))
+        )
+    )
+    llamacpp_max_tokens: int = field(
+        default_factory=lambda: int(
+            os.getenv("LLAMACPP_MAX_TOKENS", str(_DEFAULT_LLAMACPP_MAX_TOKENS))
+        )
+    )
+
     request_timeout_s: int = field(
         default_factory=lambda: int(os.getenv("REQUEST_TIMEOUT_S", str(_DEFAULT_TIMEOUT_S)))
     )
@@ -57,6 +94,17 @@ class Settings:
             )
             self.log_level = "INFO"
 
+        # Normalize and validate LLM provider
+        original_provider = self.llm_provider
+        self.llm_provider = (self.llm_provider or _DEFAULT_LLM_PROVIDER).lower()
+        if self.llm_provider not in _VALID_LLM_PROVIDERS:
+            logger.warning(
+                "Invalid LLM_PROVIDER '%s' provided; defaulting to '%s'",
+                original_provider,
+                _DEFAULT_LLM_PROVIDER,
+            )
+            self.llm_provider = _DEFAULT_LLM_PROVIDER
+
         # Validate timeout
         try:
             timeout_value = int(self.request_timeout_s)
@@ -71,7 +119,7 @@ class Settings:
             )
             self.request_timeout_s = _DEFAULT_TIMEOUT_S
 
-        # Validate and normalize base URL
+        # Validate and normalize base URL (for Ollama)
         parsed_url = urlparse(self.ollama_base_url or "")
         if not parsed_url.scheme or not parsed_url.netloc:
             logger.warning(
@@ -83,6 +131,33 @@ class Settings:
         else:
             # Normalize trailing slashes
             self.ollama_base_url = self.ollama_base_url.rstrip("/")
+
+        # Validate LlamaCpp numeric settings
+        try:
+            ctx = int(self.llamacpp_context_length)
+            if ctx <= 0:
+                raise ValueError
+            self.llamacpp_context_length = ctx
+        except (TypeError, ValueError):
+            logger.warning(
+                "Invalid LLAMACPP_CONTEXT_LENGTH '%s'; defaulting to %s",
+                self.llamacpp_context_length,
+                _DEFAULT_LLAMACPP_CONTEXT_LENGTH,
+            )
+            self.llamacpp_context_length = _DEFAULT_LLAMACPP_CONTEXT_LENGTH
+
+        try:
+            max_tokens = int(self.llamacpp_max_tokens)
+            if max_tokens <= 0:
+                raise ValueError
+            self.llamacpp_max_tokens = max_tokens
+        except (TypeError, ValueError):
+            logger.warning(
+                "Invalid LLAMACPP_MAX_TOKENS '%s'; defaulting to %s",
+                self.llamacpp_max_tokens,
+                _DEFAULT_LLAMACPP_MAX_TOKENS,
+            )
+            self.llamacpp_max_tokens = _DEFAULT_LLAMACPP_MAX_TOKENS
 
         # Normalize and clean CORS origins
         cleaned_origins: List[str] = []
@@ -101,6 +176,18 @@ class Settings:
     def log_level_int(self) -> int:
         """Return the logging module constant for the configured log level."""
         return getattr(logging, self.log_level, logging.INFO)
+
+    @property
+    def debug_model_name(self) -> str:
+        """
+        Return a human-readable model identifier for debug responses.
+
+        For Ollama we use the configured model name.
+        For LlamaCpp we surface the GGUF file name.
+        """
+        if self.llm_provider == "llamacpp":
+            return self.llamacpp_model_file
+        return self.ollama_model
 
 
 settings = Settings()

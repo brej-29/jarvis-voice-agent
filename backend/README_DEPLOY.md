@@ -1,8 +1,13 @@
-# Backend Deployment (FastAPI + Ollama)
+# Backend Deployment (FastAPI + Local LLM)
 
 This document explains how to build and run the backend in different environments,
 including local development with Ollama and container-based deployments such as
 Hugging Face Docker Spaces.
+
+For a **complete, free-first deployment runbook**, see:
+
+- `context/RUN_LOCAL.md` – local dev (backend + mobile).
+- `context/DEPLOY_FREE.md` – free deployment paths (HF Spaces + Cloudflare tunnel).
 
 ## 1. Local Development (Recommended)
 
@@ -23,7 +28,11 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Edit `.env` if needed (e.g., to change `OLLAMA_MODEL`).
+Edit `.env` if needed, for example:
+
+- `LLM_PROVIDER=ollama` (default, local-first)
+- `OLLAMA_MODEL=mistral`
+- `OLLAMA_BASE_URL=http://localhost:11434`
 
 Run the app:
 
@@ -96,13 +105,21 @@ Hugging Face Spaces can run arbitrary Docker containers. To use this backend:
    - HF CPU-only Spaces cannot run Ollama with GPU acceleration.
    - Running Ollama inside the same container is typically not feasible due to
      resource and environment constraints.
-   - As a result, this backend would either:
-     - Need to talk to an Ollama instance running elsewhere (e.g., your own server), or
-     - Be configured to use a different free LLM backend that is compatible with HF.
+   - As a result, this backend should be configured to use the **LlamaCpp** provider
+     for demos:
 
-4. If you deploy the backend on HF without a reachable Ollama instance, the `/chat`
-   endpoint will fall back to friendly error messages explaining that the local LLM
-   is unavailable.
+     - Set `LLM_PROVIDER=llamacpp`.
+     - Optionally override:
+       - `LLAMACPP_MODEL_REPO`
+       - `LLAMACPP_MODEL_FILE`
+       - `LLAMACPP_CONTEXT_LENGTH`
+       - `LLAMACPP_MAX_TOKENS`
+
+     See `context/DEPLOY_FREE.md` for a detailed HF Spaces step-by-step guide.
+
+4. If you deploy the backend on HF and the TinyLlama model cannot be downloaded or
+   initialized, the `/chat` endpoint will fall back to friendly “demo degraded”
+   messages instead of returning 500 errors.
 
 In keeping with the **free-first** constraint, this repository does not include
 paid SaaS integrations. Any cloud-based LLM usage should be opt-in and configured

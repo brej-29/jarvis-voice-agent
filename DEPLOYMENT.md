@@ -3,6 +3,11 @@
 This document outlines practical ways to deploy and run the Jarvis Voice Agent
 backend while keeping to the **free-first**, **local-first** constraints.
 
+For a full, step-by-step deployment playbook, see:
+
+- `context/RUN_LOCAL.md` – local development (backend + mobile).
+- `context/DEPLOY_FREE.md` – free deployment options (HF Spaces + Cloudflare tunnel).
+
 ---
 
 ## Option A: Local Backend + Local Ollama (Recommended)
@@ -112,19 +117,24 @@ You can deploy **just the backend** to a Hugging Face Docker Space:
 2. HF sets `$PORT` automatically; the Dockerfile and uvicorn command respect it.
 3. Expose the `/health` and `/chat` endpoints on that port.
 
-**Important limitation:**
+**Important note on LLM providers:**
 
 - HF CPU Spaces are not suitable for running Ollama with local models.
-- This backend assumes a reachable Ollama instance. In HF, you would typically:
-  - Point `OLLAMA_BASE_URL` to a remote Ollama instance you control, or
-  - Swap in a different (free) LLM backend via future configuration.
+- For a free, CPU-only demo, configure the backend to use the **LlamaCpp** provider:
+  - Set `LLM_PROVIDER=llamacpp`.
+  - Optionally override:
+    - `LLAMACPP_MODEL_REPO`
+    - `LLAMACPP_MODEL_FILE`
+    - `LLAMACPP_CONTEXT_LENGTH`
+    - `LLAMACPP_MAX_TOKENS`
+- See `context/DEPLOY_FREE.md` for a detailed HF Spaces walkthrough.
 
-If Ollama is unreachable, `/chat` will:
+If the TinyLlama model cannot be downloaded or initialized, `/chat` will:
 
 - Log the error server-side.
-- Return a friendly message to the client explaining the local LLM is unavailable.
+- Return a friendly “demo degraded” message instead of a 500 error.
 
-This keeps behavior predictable even when deployed in environments without Ollama.
+This keeps behavior predictable even when deployed in constrained environments.
 
 ---
 

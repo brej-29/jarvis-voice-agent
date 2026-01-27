@@ -179,6 +179,42 @@ This file records key decisions for the Jarvis Voice Agent project. Each entry s
 
 ---
 
+## [D-010] Dual Free Deployment Paths (HF LlamaCpp + Cloudflare Tunnel)
+
+- **Date:** 2026-01-27
+- **Decision:**
+  - Provide two official, free deployment paths for the backend:
+    - **HF Spaces + LlamaCpp (demo mode):**
+      - Use a CPU-only TinyLlama GGUF model via `llama-cpp-python`.
+      - Configure with `LLM_PROVIDER=llamacpp`.
+    - **Local backend + Cloudflare tunnel (best experience):**
+      - Run Ollama + backend locally (`LLM_PROVIDER=ollama`).
+      - Expose `/chat` publicly via a temporary Cloudflare tunnel URL.
+  - Introduce `LLM_PROVIDER` and LlamaCpp-specific settings in backend config:
+    - `LLM_PROVIDER` (default `ollama`).
+    - `LLAMACPP_MODEL_REPO`, `LLAMACPP_MODEL_FILE`, `LLAMACPP_CONTEXT_LENGTH`, `LLAMACPP_MAX_TOKENS`.
+- **Rationale:**
+  - HF CPU Spaces cannot reliably run Ollama in a free, GPU-accelerated way.
+  - A tiny GGUF model provides a **fully free**, container-friendly demo path without adding paid SaaS dependencies.
+  - Cloudflare Tunnel allows users to keep the **full-quality local Ollama setup** while sharing it temporarily with phones or remote devices.
+  - The `LLM_PROVIDER` switch keeps configuration explicit and easy to reason about.
+- **Implications:**
+  - The backend now has two local LLM backends behind a single `/chat` API:
+    - Ollama for local-first usage.
+    - LlamaCpp TinyLlama for constrained/demo environments.
+  - HF Spaces deployments should:
+    - Set `LLM_PROVIDER=llamacpp`.
+    - Expect slower cold starts while the TinyLlama model downloads and initializes.
+    - Surface “demo degraded” messages instead of raw 500s when the model fails.
+  - Local deployments remain unchanged by default (`LLM_PROVIDER=ollama`), preserving the free-first, local-first behavior.
+  - New environment variables must be documented and kept in sync across:
+    - `backend/.env.example`
+    - `context/ARCHITECTURE.md`
+    - `context/COMPONENTS.md`
+    - `context/DEPLOY_FREE.md`.
+
+---
+
 When making new decisions:
 
 1. Add a new section with an ID `[D-XXX]`.
