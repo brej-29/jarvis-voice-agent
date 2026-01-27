@@ -62,6 +62,14 @@ class AssistantScreen extends StatelessWidget {
         title: const Text('Jarvis Voice Assistant'),
         actions: [
           IconButton(
+            icon: const Icon(Icons.download),
+            tooltip: 'Export chat as JSON',
+            onPressed: () {
+              Log.info('Exporting conversation', tag: 'AssistantScreen');
+              context.read<AssistantController>().exportConversation();
+            },
+          ),
+          IconButton(
             icon: const Icon(Icons.settings),
             onPressed: () {
               Log.info('Navigating to settings', tag: 'AssistantScreen');

@@ -127,6 +127,20 @@ The backend’s `prompt_builder` reads small, curated excerpts from `GOAL.md` an
   - Builds a concise system prompt for the LLM.
   - Designed to be easily extendable if new context files are added later.
 
+- `backend/app/services/weather.py`
+  - Integrates with **Open-Meteo**'s free APIs:
+    - Geocoding (`https://geocoding-api.open-meteo.com`) to resolve city names (optional).
+    - Forecast (`https://api.open-meteo.com`) to retrieve current weather.
+  - Provides:
+    - `get_weather_description(...)` for a short, natural-language summary.
+  - Geocoding failures and API issues are handled gracefully with friendly messages.
+
+- `backend/app/services/reminder.py`
+  - Uses the `dateparser` library to parse natural-language date/time expressions.
+  - Exposes:
+    - `parse_natural_datetime(text, timezone=...)` → timezone-aware `datetime`.
+  - Used by the tool router to turn `SET_REMINDER` `ToolCall`s into concrete timestamps for local notifications.
+
 ### Routers
 
 - `backend/app/routers/health.py`
@@ -137,15 +151,30 @@ The backend’s `prompt_builder` reads small, curated excerpts from `GOAL.md` an
   - `POST /chat`
   - Flow:
     1. Validate `ChatRequest` with Pydantic.
-    2. Build system prompt via `prompt_builder`.
-    3. Compose messages to send to Ollama.
-    4. Call `OllamaClient` and measure latency.
-    5. Return `ChatResponse` with:
+    2. Build a **tool-routing system prompt** via `prompt_builder` that:
+       - Describes available tools (weather, reminders, notes, general QA).
+       - Defines a strict JSON contract for `ToolCall`.
+    3. Ask the LLM to return **only JSON** with:
+       - `tool_call`: `{ "name": ..., "args": {...}, "confidence": 0.0-1.0 }`
+       - `assistant_message`: optional natural-language reply.
+    4. Parse the JSON:
+       - If parsing fails, attempt a single \"fix JSON\" retry.
+       - If it still fails, fall back to GENERAL_QA without tools.
+    5. Execute tools server-side:
+       - `WEATHER` → calls Open-Meteo via `weather.py` and returns a grounded summary.
+       - `SET_REMINDER` → parses datetime and emits an action:
+         - `{\"type\": \"SCHEDULE_LOCAL_NOTIFICATION\", ...}`.
+       - `SAVE_NOTE` → emits an action:
+         - `{\"type\": \"SAVE_NOTE_LOCAL\", ...}`.
+       - `GENERAL_QA` → direct answer via LLM (using the base system prompt).
+    6. Return `ChatResponse` with:
        - `reply_text`
        - `debug` (model + latency)
        - `errors` (if any)
+       - `actions` (list of client-side actions such as local notifications and notes)
+       - `tool_debug` (parsed `ToolCall` and JSON-fix info for debugging).
   - Handles exceptions robustly:
-    - Logs detailed errors with request_id.
+    - Logs detailed errors with `request_id`.
     - Returns friendly, non-leaky error messages to the client.
 
 ### Entry Point & Tests
@@ -181,6 +210,17 @@ The backend’s `prompt_builder` reads small, curated excerpts from `GOAL.md` an
   - Defines `AppException` and more specific exceptions:
     - Permission errors, network errors, STT/TTS errors.
   - Used to ensure controllers surface meaningful messages to the UI.
+
+- `mobile/lib/core/storage.dart`
+  - Initializes and manages local storage with **Hive**.
+  - Persists:
+    - Conversation history per `session_id`.
+    - Notes created via tool actions.
+  - Provides JSON export helpers for conversations.
+
+- `mobile/lib/core/notifications.dart`
+  - Wraps `flutter_local_notifications` initialization and scheduling.
+  - Schedules reminders locally on the device in response to backend `actions`.
 
 ### Assistant Feature (`features/assistant/`)
 

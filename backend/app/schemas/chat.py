@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import List, Literal
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
@@ -76,11 +76,58 @@ class DebugInfo(BaseModel):
     latency_ms: int = Field(..., ge=0)
 
 
+class ToolName(str, Enum):
+    WEATHER = "WEATHER"
+    SET_REMINDER = "SET_REMINDER"
+    SAVE_NOTE = "SAVE_NOTE"
+    GENERAL_QA = "GENERAL_QA"
+
+
+class ToolCall(BaseModel):
+    """
+    Structured representation of a tool call chosen by the model.
+
+    The JSON contract exposed to the model is:
+
+        {
+          "name": "WEATHER"|"SET_REMINDER"|"SAVE_NOTE"|"GENERAL_QA",
+          "args": { ... },
+          "confidence": 0.0-1.0
+        }
+    """
+
+    name: ToolName
+    args: Dict[str, Any] = Field(default_factory=dict)
+    confidence: float = Field(..., ge=0.0, le=1.0)
+
+
+class ToolRouterResult(BaseModel):
+    """
+    Container for the JSON object the model should return when routing tools.
+
+        {
+          "tool_call": ToolCall,
+          "assistant_message": "optional natural language message"
+        }
+    """
+
+    tool_call: ToolCall
+    assistant_message: Optional[str] = None
+
+
 class ChatResponse(BaseModel):
     session_id: str
     reply_text: str
     debug: DebugInfo
     errors: List[str] = Field(default_factory=list)
+    actions: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="List of action objects for the client to execute, e.g. local notifications.",
+    )
+    tool_debug: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Optional debug information for tool routing, not for user display.",
+    )
 
     @classmethod
     def friendly_error_response(
@@ -111,5 +158,8 @@ __all__ = [
     "ChatRequest",
     "DebugInfo",
     "ChatResponse",
+    "ToolName",
+    "ToolCall",
+    "ToolRouterResult",
     "ValidationError",
 ]

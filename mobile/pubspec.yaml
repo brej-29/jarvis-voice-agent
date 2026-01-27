@@ -23,6 +23,14 @@ dependencies:
   # State management
   provider: ^6.1.1
 
+  # Local storage
+  hive: ^2.2.3
+  hive_flutter: ^1.1.0
+  path_provider: ^2.1.4
+
+  # Local notifications
+  flutter_local_notifications: ^17.2.3
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

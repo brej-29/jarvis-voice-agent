@@ -7,12 +7,22 @@ import '../../core/errors.dart';
 import '../../core/logger.dart';
 import 'assistant_models.dart';
 
+class AssistantReply {
+  AssistantReply({
+    required this.replyText,
+    required this.actions,
+  });
+
+  final String replyText;
+  final List<AssistantAction> actions;
+}
+
 class AssistantService {
   AssistantService({http.Client? client}) : _client = client ?? http.Client();
 
   final http.Client _client;
 
-  Future<String> sendChat({
+  Future<AssistantReply> sendChat({
     required String sessionId,
     required List<AssistantMessage> history,
     required ResponseStyle responseStyle,
@@ -51,7 +61,13 @@ class AssistantService {
         throw NetworkException('Invalid response from backend (missing reply_text)');
       }
 
-      return replyText;
+      final actionsJson = decoded['actions'] as List<dynamic>? ?? <dynamic>[];
+      final actions = actionsJson
+          .whereType<Map<String, dynamic>>()
+          .map(AssistantAction.fromJson)
+          .toList();
+
+      return AssistantReply(replyText: replyText, actions: actions);
     } catch (e, stackTrace) {
       Log.error(
         'Failed to call backend /chat',

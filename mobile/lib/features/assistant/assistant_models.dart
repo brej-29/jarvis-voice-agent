@@ -47,3 +47,20 @@ class AssistantMessage {
     };
   }
 }
+
+class AssistantAction {
+  AssistantAction({
+    required this.type,
+    required this.payload,
+  });
+
+  final String type;
+  final Map<String, dynamic> payload;
+
+  factory AssistantAction.fromJson(Map<String, dynamic> json) {
+    return AssistantAction(
+      type: json['type'] as String,
+      payload: Map<String, dynamic>.from(json)..remove('type'),
+    );
+  }
+}
