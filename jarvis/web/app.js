@@ -182,3 +182,7 @@ if (!SR) {
   });
   $("#voice-hint").textContent = "Click the microphone and speak, or type below. Speech recognition runs in your browser.";
 }
+
+/* ?say=one|two runs requests on load, handy for sharing an example */
+const preset = new URLSearchParams(location.search).get("say");
+if (preset) (async () => { for (const t of preset.split("|").slice(0, 5)) await send(t); })();

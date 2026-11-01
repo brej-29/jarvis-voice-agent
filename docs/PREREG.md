@@ -123,4 +123,43 @@ comparisons are like for like. Non-LLM systems are additionally scored on the fu
 
 ## Deviations
 
-(none yet)
+Listed in the order they happened. None changed a threshold.
+
+1. **Commit order.** This file was written before any router was trained, but it was committed after the
+   first rule-based, linear and joint runs existed locally. It has not been edited since, apart from
+   appending this section and the outcomes below.
+2. **Subset size.** The stratified LLM subset has 539 requests, not 600, because the test set has only 39
+   note requests.
+3. **Notes and wake word.** MASSIVE has no "save a note" intent, so a model trained on it alone could not
+   take a note. Synthetic note phrasings (`training/synth.py`, split by content between train and dev) and a
+   wake-word augmentation ("hey jarvis") were added to training. The test set is untouched. The
+   MASSIVE-only model is kept and reported as `J1v0`, so the pre-registered setup is still measured.
+4. **Speech.** T6 failed with a MASSIVE-only model. The planned fallback was simulated recognition noise;
+   instead I used real recogniser output: 6,600 Whisper base.en transcripts of SLURP *train* recordings
+   (sentences that also occur in MASSIVE dev or test are excluded), with slot tags carried over by word
+   alignment. Recogniser digits are now spelled out before routing ("10" to "ten").
+5. **Shipped model.** The shipped model is the speech-aware one (`J1`), seed 0 of three, chosen by dev
+   macro-F1 (not test). Reported seeds: all three.
+6. **Extra ablations** not in the plan: Whisper size sweep (tiny, base, small, medium), V1 prompt without the
+   pasted docs (H3), a Mistral 7B run through llama.cpp on GPU (the V1 default family, but a GGUF Q4_K_M build
+   rather than Ollama's tag).
+7. **Latency.** Latency in the accuracy runs was measured while other jobs shared the CPU. The numbers
+   reported as latency come from `jarvis.bench.latency`, run alone on an idle machine.
+
+## Outcomes
+
+Filled in after the runs, from `bench/results`. The Evidence page shows the same table.
+
+| Id | Result |
+|---|---|
+| T1 | Met by the MASSIVE-only model (0.951 mean of 3 seeds), missed by a hair by the shipped model (0.948 mean). |
+| T2 | Met (0.6% false actions). |
+| T3 | Met (p95 3.4 ms). |
+| T4 | Met against the V1 prompt (+46 points, CI 41 to 51). Against the fair constrained-prompt baseline the gain is +7.4 points (CI 3.8 to 11.2), under the +10 target. |
+| T5 | Met (city 97.5%, time 85.5%). |
+| T6 | Missed with Whisper base.en (10 points). Met with Whisper medium.en (1.7 points). |
+| T7 | Met (98.6%). |
+| H1 | Supported. V1 prompt output was valid for 55% (Qwen 1.5B) and 80% (Qwen 0.5B) of requests. |
+| H2 | Supported. About 1,500 times slower at the median (3.3 s against 2.2 ms). |
+| H3 | Refuted. Removing the pasted docs raised macro-F1 from 0.49 to 0.67 and valid output from 55% to 91%. Latency did not fall. |
+| H4 | Supported. The linear model is 1.1 points behind on tool choice (0.930 against 0.941). The joint model's gain is in arguments (city 85% to 97%, time 47% to 86%). |

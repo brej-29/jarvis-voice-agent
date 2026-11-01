@@ -87,9 +87,9 @@ main { padding: clamp(20px, 4vw, 44px) clamp(16px, 4vw, 40px); max-width: 1240px
 .slip.is-no { background-image: repeating-linear-gradient(135deg, transparent 0 9px, color-mix(in srgb, var(--no) 10%, transparent) 9px 10px); }
 .said { font: 600 1.35rem/1.3 var(--display); letter-spacing: -.01em; }
 .said mark { background: none; color: inherit; border-bottom: 3px solid; padding-bottom: 1px; }
-.s-city { border-color: var(--weather); }
-.s-when { border-color: var(--reminder); }
-.s-title { border-color: var(--note); }
+.said mark.s-city { border-color: var(--weather); }
+.said mark.s-when { border-color: var(--reminder); }
+.said mark.s-title { border-color: var(--note); }
 .verdict { display: flex; align-items: center; gap: 14px; margin-top: 14px; flex-wrap: wrap; }
 .chip { font: 700 .82rem var(--body); padding: 4px 11px; border-radius: 8px; color: #10131b; }
 .t-weather { background: var(--weather); } .t-set_reminder { background: var(--reminder); } .t-save_note { background: var(--note); }

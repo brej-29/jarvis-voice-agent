@@ -31,7 +31,12 @@ def test_weather_needs_a_city():
 def test_clean_spells_out_recogniser_digits():
     from jarvis.routers.joint import clean
 
-    assert clean("Block 1 hour from 10 tomorrow.") == "block one hour from ten tomorrow".split()
-    assert clean("Wake me at 5:30 p.m.") == "wake me at five thirty p m".split()
-    assert clean("the 7-day forecast") == "the seven day forecast".split()
+    assert clean("Block 1 hour from 10 tomorrow.") == ["block", "one", "hour", "from", "ten", "tomorrow"]
+    assert clean("Wake me at 5:30 p.m.") == ["wake", "me", "at", "five", "thirty", "p", "m"]
+    assert clean("the 7-day forecast") == ["the", "seven", "day", "forecast"]
     assert clean("What's the weather?") == ["what's", "the", "weather"]
+
+
+def test_reminder_title_fallback():
+    assert tools.reminder_title("remind me to call mum tomorrow at 5 pm", "tomorrow 5 pm") == "call mum"
+    assert tools.reminder_title("remind me to take the bins out tonight", "tonight") == "take the bins out"

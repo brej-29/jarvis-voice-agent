@@ -14,9 +14,8 @@ from jarvis.schema import Route
 MODEL_DIR = Path(__file__).resolve().parents[2] / "models" / "joint"
 SLOT_TAGS = ("O", "B-CITY", "I-CITY", "B-WHEN", "I-WHEN", "B-TITLE", "I-TITLE")
 _PUNCT = re.compile(r"[^\w\s']")
-_SMALL = ("zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen "
-          "sixteen seventeen eighteen nineteen").split()
-_TENS = "x x twenty thirty forty fifty sixty seventy eighty ninety".split()
+_SMALL = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen"]
+_TENS = ["x", "x", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"]
 _CLOCK = re.compile(r"(?<![\d:])(\d{1,2}):(\d{2})(?![\d:])")
 _NUM = re.compile(r"(?<![\d.])\d{1,3}(?![\d.])")
 

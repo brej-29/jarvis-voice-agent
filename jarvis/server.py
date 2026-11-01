@@ -76,7 +76,9 @@ async def chat(body: ChatIn):
     if r.tool == "WEATHER":
         reply, action = await tools.weather(r.args.get("city") or body.default_city)
     elif r.tool == "SET_REMINDER":
-        reply, action = tools.reminder(r.args.get("when", ""), r.args.get("title", ""), body.tz_offset_min)
+        when = r.args.get("when", "")
+        title = r.args.get("title") or tools.reminder_title(body.text, when)
+        reply, action = tools.reminder(when, title, body.tz_offset_min)
     elif r.tool == "SAVE_NOTE":
         reply, action = tools.note(body.text)
     elif r.tool == "GENERAL_QA":

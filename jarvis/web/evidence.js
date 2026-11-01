@@ -12,8 +12,8 @@ const SHORT = { R0: "Keyword rules", M1: "TF-IDF + linear model", J1v0: "Joint m
   "L1-0.5B": "Qwen 0.5B, short prompt", "L0-0.5B": "Qwen 0.5B, V1 prompt" };
 const get = (rows, id) => rows.find((r) => r.id === id);
 
-function table(head, rows) {
-  return `<details class="tv"><summary>Show as a table</summary><table><thead><tr>${head.map((h, i) => `<th class="${i ? "num" : ""}">${h}</th>`).join("")}</tr></thead><tbody>${rows.map((r) => `<tr>${r.map((c, i) => `<td class="${i ? "num" : ""}">${c}</td>`).join("")}</tr>`).join("")}</tbody></table></details>`;
+function table(head, rows, open = false) {
+  return `<details class="tv"${open ? " open" : ""}><summary>${open ? "Table" : "Show as a table"}</summary><table><thead><tr>${head.map((h, i) => `<th class="${i ? "num" : ""}">${h}</th>`).join("")}</tr></thead><tbody>${rows.map((r) => `<tr>${r.map((c, i) => `<td class="${i ? "num" : ""}">${c}</td>`).join("")}</tr>`).join("")}</tbody></table></details>`;
 }
 
 /* Horizontal bars with 95% CI whiskers. rows: {label, v, lo, hi, group} */
@@ -100,27 +100,33 @@ function scoreboard(d) {
   add("T3", "Router latency, 95th percentile", "at most 25 ms", shipped ? msFull(shipped.p95) : "n/a", shipped && shipped.p95 <= 25 ? "pass" : "fail");
   if (bestL0) add("T4", "Gain over the best Jarvis V1 prompt result", "at least 10 points, CI above 0", `+${(bestL0.diff * 100).toFixed(1)} points vs ${bestL0.vs} (CI ${(bestL0.lo * 100).toFixed(1)} to ${(bestL0.hi * 100).toFixed(1)})`, bestL0.diff >= 0.1 && bestL0.lo > 0 ? "pass" : "fail");
   add("T5", "City and time arguments, given the right tool", "at least 90% and 75%", `${pct(J.city_acc[0])} and ${pct(J.when_acc[0])}`, J.city_acc[0] >= 0.9 && J.when_acc[0] >= 0.75 ? "pass" : "fail");
-  if (asrJ) add("T6", "Drop on real recorded speech", "at most 5 points", `${((asrJ.clean - asrJ.asr) * 100).toFixed(1)} points (${f3(asrJ.clean)} to ${f3(asrJ.asr)})`, asrJ.clean - asrJ.asr <= 0.05 ? "pass" : "fail");
+  if (asrJ) {
+    const med = d.asr.sizes.find((z) => z.model === "medium.en" && z.f1 != null);
+    const base = asrJ.clean - asrJ.asr, big = med ? asrJ.clean - med.f1 : null;
+    add("T6", "Drop on real recorded speech", "at most 5 points",
+      `${(base * 100).toFixed(1)} points with Whisper base.en (${f3(asrJ.clean)} to ${f3(asrJ.asr)})${med ? `; ${(big * 100).toFixed(1)} points with medium.en` : ""}`,
+      base <= 0.05 ? "pass" : big != null && big <= 0.05 ? "mixed" : "fail");
+  }
   add("T7", "Honest about unsupported requests", "at least 85%", pct(J.honesty[0]), J.honesty[0] >= 0.85 ? "pass" : "fail");
   return rows;
 }
 
 export async function renderEvidence(root) {
   let d;
-  try { d = await (await fetch("results.json")).json(); } catch { root.innerHTML = "<h1>Evidence</h1><p class='lede'>results.json is missing. Run <code>python bench/summarize.py</code>.</p>"; return; }
+  try { d = await (await fetch("results.json", { cache: "no-cache" })).json(); } catch { root.innerHTML = "<h1>Evidence</h1><p class='lede'>results.json is missing. Run <code>python bench/summarize.py</code>.</p>"; return; }
   const sub = d.rows.subset, full = d.rows.full;
   const l0 = sub.filter((r) => r.id.startsWith("L0-"));
   const worst = l0.sort((a, b) => b.far - a.far)[0] || l0[0];
   const l0q = get(sub, "L0-1.5B"), j = get(sub, "J1"), jf = get(full, "J1"), m1 = get(full, "M1"), l1q = get(sub, "L1-1.5B");
   const asrJ = d.asr.rows.find((r) => r.id === "J1");
   const lat = d.latency && d.latency.rows;
-  const latRows = lat ? [["R0", "Keyword rules", "base"], ["M1", "TF-IDF + logistic regression", "fast"], ["J1", "Joint model (shipped)", "fast"], ["L1", "Constrained prompt, Qwen2.5 1.5B", "llm"], ["L0", "Jarvis V1 prompt, Qwen2.5 1.5B", "llm"]]
+  const latRows = lat ? [["M1", "TF-IDF + logistic regression", "fast"], ["J1", "Joint model (shipped)", "fast"], ["L1", "Constrained prompt, Qwen2.5 1.5B", "llm"], ["L0", "Jarvis V1 prompt, Qwen2.5 1.5B", "llm"]]
     .filter(([k]) => lat[k]).map(([k, label, group]) => ({ label, group, p50: lat[k].p50_ms, p95: lat[k].p95_ms })) : [];
 
   const barRows = [...sub].sort((a, b) => b.f1 - a.f1)
     .map((r) => ({ label: SHORT[r.id] || r.label, v: r.f1, lo: r.lo, hi: r.hi, group: r.group }));
   const sc = scoreboard(d);
-  const status = { pass: ["pass", "Met"], near: ["near", "Missed by a hair"], fail: ["fail", "Missed"] };
+  const status = { pass: ["pass", "Met"], near: ["near", "Missed by a hair"], mixed: ["near", "Depends on the recogniser"], fail: ["fail", "Missed"] };
 
   root.innerHTML = `
   <header class="ev-head"><h1>Does a voice assistant need an LLM to decide what to do?</h1>
@@ -132,28 +138,28 @@ export async function renderEvidence(root) {
     <div class="legend"><span><i style="background:var(--c-fast)"></i>On-device model</span><span><i style="background:var(--c-llm)"></i>Language model prompted to route</span><span><i style="background:var(--c-base)"></i>Keyword rules</span></div>
     ${barChart(barRows, { aria: "Action macro-F1 per system with 95 percent confidence intervals" })}
     ${table(["System", "Macro-F1", "95% CI", "False actions", "Missed", "Valid output"], sub.map((r) => [r.label, f3(r.f1), `${f3(r.lo)} to ${f3(r.hi)}`, pct(r.far), pct(r.miss), pct(r.valid, 0)]))}
-    ${l0q ? `<p class="callout">Only ${pct(l0q.valid, 0)} of the V1 prompt's outputs were valid JSON for the schema, and it never said "I cannot do that" (honesty ${pct(l0q.honesty, 0)}), because V1 had no such label. ${l1q ? `A short prompt with constrained decoding fixes the format (${pct(l1q.valid, 0)} valid) and reaches ${f3(l1q.f1)}, but it still acts on ${pct(l1q.far)} of requests it should decline.` : ""}</p>` : ""}
+    ${l0q ? `<p class="callout">Only ${pct(l0q.valid, 0)} of the V1 prompt's outputs were valid JSON for the schema, and it never said "I cannot do that" (honesty ${pct(l0q.honesty, 0)}), because V1 had no such label. ${get(sub, "L0-7B") ? `Mistral 7B, the model family V1 defaulted to, returned valid JSON for ${pct(get(sub, "L0-7B").valid, 0)} of requests: it answered in prose and invented a weather API call instead. ` : ""}${l1q ? `A short prompt with constrained decoding fixes the format (${pct(l1q.valid, 0)} valid) and reaches ${f3(l1q.f1)}, but it still acts on ${pct(l1q.far)} of requests it should decline.` : ""}</p>` : ""}
   </section>
 
   <section class="block" aria-labelledby="e2">
     <h2 id="e2">${j && lat ? `The on-device model is ${Math.round((lat.L0 ? lat.L0.p50_ms : l0q.p50) / lat.J1.p50_ms).toLocaleString()} times faster than the V1 prompt` : "Speed"}</h2>
     <p>A small transformer reads the request once and outputs the intent and the argument spans together. Exported as int8 ONNX it is a ${d.model_mb || 23} MB file that runs on one CPU thread. Timings are router only, one request at a time, measured on an otherwise idle laptop.</p>
-    ${latRows.length ? latencyChart(latRows) + table(["System", "Median", "95th percentile"], latRows.map((r) => [r.label, msFull(r.p50), msFull(r.p95)])) : "<p>Latency table is not available.</p>"}
+    ${latRows.length ? latencyChart(latRows) + table(["System", "Median", "95th percentile"], [["Keyword rules", msFull(lat.R0.p50_ms), msFull(lat.R0.p95_ms)], ...latRows.map((r) => [r.label, msFull(r.p50), msFull(r.p95)])]) : "<p>Latency table is not available.</p>"}
   </section>
 
   <section class="block" aria-labelledby="e3">
     <h2 id="e3">Choosing the tool is easy. Reading the arguments is where the model earns its place</h2>
     <p>A linear model on word and character n-grams gets most of the way on tool choice. The transformer's gain is in the city and the time it hears.</p>
     ${table(["System", "Macro-F1", "City correct", "Time correct", "False actions"], full.filter((r) => ["R0", "M1", "J1v0", "J1"].includes(r.id)).map((r) => [r.label, f3(r.f1), pct(r.city), pct(r.when), pct(r.far, 2)]))}
-    ${m1 && jf ? `<p class="say-it">Tool choice: ${f3(m1.f1)} with the linear model against ${f3(jf.f1)} here. Time arguments: ${pct(m1.when, 0)} against ${pct(jf.when, 0)}.</p>` : ""}
+    ${m1 && jf ? `<p class="say-it">Tool choice: ${f3(m1.f1)} with the linear model against ${f3(d.seeds.J1.action_macro_f1[0])} here (mean of three seeds). Time arguments: ${pct(m1.when, 0)} against ${pct(d.seeds.J1.when_acc[0], 0)}.</p>` : ""}
   </section>
 
   <section class="block" aria-labelledby="e4">
     <h2 id="e4">${asrJ ? `Real speech is the harder problem: ${((asrJ.clean - asrJ.asr) * 100).toFixed(0)} points lost between text and a microphone` : "Real speech"}</h2>
     <p>I played real recordings (SLURP, headset and far-field) through Whisper and routed the transcripts. Same requests, same labels, never seen in training. Whisper base.en made ${d.asr.sizes.find((s) => s.model === "base.en") ? pct(d.asr.sizes.find((s) => s.model === "base.en").wer, 0) : ""} word errors on this set.</p>
     ${d.asr.rows.length ? `<div class="legend"><span><i style="background:var(--ink)"></i>Gold text</span><span><i style="background:var(--c-base)"></i>Whisper transcript</span></div>${dumbbell(d.asr.rows)}${table(["System", "Gold text", "Speech", "False actions on speech"], d.asr.rows.map((r) => [r.id, f3(r.clean), f3(r.asr), pct(r.far_asr)]))}` : ""}
-    ${d.asr.sizes.filter((s) => s.f1 != null).length > 1 ? `<h3>A better recogniser buys back more than any routing trick</h3>${table(["Whisper model", "Word error rate", "Macro-F1", "False actions"], d.asr.sizes.filter((s) => s.f1 != null).map((s) => [s.model, pct(s.wer, 0), f3(s.f1), pct(s.far)]))}` : ""}
-    <p class="callout">Training on 6,600 real recogniser transcripts helped (${d.seeds_asr.J1aug && d.seeds_asr.J1aug.action_macro_f1 ? f3(d.seeds_asr.J1aug.action_macro_f1[0]) + " to " : ""}${d.seeds_asr.J1.action_macro_f1 ? f3(d.seeds_asr.J1.action_macro_f1[0]) : ""} on speech) but did not close the gap. When the recogniser turns "weather" into "rider", no router can recover it. The fix has to be earlier in the pipeline.</p>
+    ${d.asr.sizes.filter((s) => s.f1 != null).length > 1 ? `<h3>A better recogniser buys back more than any routing trick</h3>${table(["Whisper model", "Word error rate", "Macro-F1", "False actions"], d.asr.sizes.filter((s) => s.f1 != null).map((s) => [s.model, pct(s.wer, 0), f3(s.f1), pct(s.far)]), true)}` : ""}
+    <p class="callout">Training on 6,600 real recogniser transcripts helped (${d.seeds_asr.J1aug && d.seeds_asr.J1aug.action_macro_f1 ? f3(d.seeds_asr.J1aug.action_macro_f1[0]) + " to " : ""}${d.seeds_asr.J1.action_macro_f1 ? f3(d.seeds_asr.J1.action_macro_f1[0]) : ""} on speech) but did not close the gap. When the recogniser turns "weather" into "rider", no router can recover it. ${(() => { const m = d.asr.sizes.find((z) => z.model === "medium.en" && z.f1 != null); return m && asrJ ? `The fix is earlier in the pipeline: with Whisper medium.en the same router scores ${f3(m.f1)} on speech, ${((asrJ.clean - m.f1) * 100).toFixed(1)} points below gold text.` : "The fix is earlier in the pipeline."; })()}</p>
   </section>
 
   ${d.sweep.length ? `<section class="block" aria-labelledby="e5">

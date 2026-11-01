@@ -1,6 +1,7 @@
 """The things Jarvis can actually do. Each returns (spoken reply, optional client action)."""
 
 import os
+import re
 from datetime import datetime, timedelta, timezone
 
 import dateparser
@@ -78,6 +79,20 @@ def reminder(when: str, title: str, tz_offset_min: int = 0, now: datetime | None
     spoken = at.strftime("%A %d %B at %I:%M %p").replace(" 0", " ")
     return f"Okay, I will remind you: {label}, on {spoken}.", {
         "type": "reminder", "title": label, "at": at.isoformat()}
+
+
+_LEAD = re.compile(r"^(?:(?:hey |ok |okay )?jarvis,? )?(?:please )?(?:remind me|set (?:a |an )?reminder|reminder)(?: to| about| that| for)? ?")
+
+
+def reminder_title(text: str, when: str) -> str:
+    """Fallback title when the router found no event span: the request minus the trigger and the time."""
+    t = _LEAD.sub("", text.lower().strip())
+    for w in when.split():
+        t = re.sub(rf"\b{re.escape(w)}\b", " ", t, count=1)
+    words = t.replace(",", " ").split()
+    while words and words[-1] in {"at", "on", "for", "by", "in", "from", "till", "until", "to", "and"}:
+        words.pop()
+    return " ".join(words)
 
 
 def note(text: str):
