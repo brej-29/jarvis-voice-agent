@@ -7,6 +7,7 @@ RUN pip install "fastapi>=0.110,<1" "uvicorn>=0.27,<1" "httpx>=0.26,<1" "numpy>=
 COPY --chown=user jarvis ./jarvis
 COPY --chown=user models/joint ./models/joint
 USER user
-ENV JARVIS_SPEND_FILE=/home/user/data/spend.json \n    JARVIS_ALLOWED_HOSTS="*.hf.space,hf.space"
+ENV JARVIS_SPEND_FILE=/home/user/data/spend.json
+ENV JARVIS_ALLOWED_HOSTS="*.hf.space,hf.space"
 EXPOSE 7860
 CMD ["python", "-m", "jarvis", "--host", "0.0.0.0", "--port", "7860", "--no-browser"]
