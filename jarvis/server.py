@@ -85,7 +85,7 @@ async def chat(body: ChatIn):
     elif r.tool == "SAVE_NOTE":
         reply, action = tools.note(body.text)
     elif r.tool == "GENERAL_QA":
-        reply = await tools.answer(body.text, body.history)
+        reply = tools.GREETING if r.intent == "general_greet" else await tools.answer(body.text, body.history)
     else:
         reply = tools.unsupported(r.intent)
     return {"reply": reply, "action": action, "route": route_json(r)}

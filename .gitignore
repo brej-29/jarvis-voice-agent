@@ -16,3 +16,4 @@ models/**/*.fp32.onnx
 .venv-gpu/
 bench/results/*_th*.preds.jsonl
 .site_build/
+.vendor_cache/

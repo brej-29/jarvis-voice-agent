@@ -1,0 +1,17 @@
+{
+ "ort.min.js": {
+  "url": "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/ort.min.js",
+  "sha256": "be6e560b64c03c99252eedc0e1989e9e51e44d9f191e7655c9bf011bf9f576c8",
+  "bytes": 446284
+ },
+ "ort-wasm-simd-threaded.mjs": {
+  "url": "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/ort-wasm-simd-threaded.mjs",
+  "sha256": "745eb7c0ce6f18a6aa521971b2877babc7ffb27eecb58ab3bc6e5ef4692672e8",
+  "bytes": 24618
+ },
+ "ort-wasm-simd-threaded.wasm": {
+  "url": "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/ort-wasm-simd-threaded.wasm",
+  "sha256": "207d02be4591c156b0a98f024f3d58005b5b04c92274d759fb390338c63559ea",
+  "bytes": 11246032
+ }
+}
