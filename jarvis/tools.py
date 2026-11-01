@@ -65,7 +65,7 @@ async def weather(city: str, client: httpx.AsyncClient | None = None) -> tuple[s
 
 
 _WORD_NUM = {w: str(i) for i, w in enumerate(
-    "zero one two three four five six seven eight nine ten eleven twelve".split())}
+    ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve"])}
 _DAYPART = {"morning": "9 am", "afternoon": "3 pm", "evening": "6 pm", "night": "8 pm"}
 _HAS_TIME = re.compile(r"\d|noon|midnight|\bam\b|\bpm\b|\bin \w+ (?:minutes?|hours?)\b")
 _MINUTES = {"fifteen": "15", "thirty": "30", "forty five": "45"}
