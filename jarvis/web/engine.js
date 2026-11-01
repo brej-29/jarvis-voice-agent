@@ -1,0 +1,214 @@
+/* One interface for the UI, two backends.
+   Server mode (python -m jarvis): calls /api/health and /api/chat.
+   Static mode (GitHub Pages, window.JARVIS_STATIC): runs the same int8 ONNX router in the browser. */
+export const STATIC = !!window.JARVIS_STATIC;
+
+const ORT = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/";
+const CHRONO = "https://cdn.jsdelivr.net/npm/chrono-node@2.7.7/+esm";
+const MODEL = "model/";
+
+export async function health() {
+  if (!STATIC) return (await fetch("api/health")).json();
+  const r = await router();
+  return { status: "ok", threshold: r.meta.threshold };
+}
+
+export async function chat(body) {
+  if (!STATIC) {
+    const res = await fetch("api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    if (!res.ok) throw new Error(res.status);
+    return res.json();
+  }
+  const r = await router();
+  const t0 = performance.now();
+  const route = await r.finish(r.route(body.text));
+  route.ms = performance.now() - t0;
+  const { reply, action } = await act(route, body);
+  return { reply, action, route };
+}
+
+/* ---------- text normalisation, a port of jarvis/routers/joint.py ---------- */
+const SMALL = "zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen".split(" ");
+const TENS = "x x twenty thirty forty fifty sixty seventy eighty ninety".split(" ");
+function numWords(n) {
+  if (n < 20) return SMALL[n];
+  if (n < 100) return TENS[Math.floor(n / 10)] + (n % 10 ? " " + SMALL[n % 10] : "");
+  return SMALL[Math.floor(n / 100)] + " hundred" + (n % 100 ? " " + numWords(n % 100) : "");
+}
+export function clean(text) {
+  let t = text.toLowerCase().replace(/-/g, " ");
+  t = t.replace(/(?<![\d:])(\d{1,2}):(\d{2})(?![\d:])/g, (_, h, m) => numWords(+h) + (+m === 0 ? "" : +m < 10 ? " oh " + numWords(+m) : " " + numWords(+m)));
+  t = t.replace(/(?<![\d.])\d{1,3}(?![\d.])/g, (m) => numWords(+m));
+  return t.replace(/[^\p{L}\p{N}_\s']/gu, " ").split(/\s+/).filter(Boolean);
+}
+
+/* ---------- BERT WordPiece, matching the HF tokenizer used in training ---------- */
+const isPunct = (c) => { const k = c.codePointAt(0); return (k >= 33 && k <= 47) || (k >= 58 && k <= 64) || (k >= 91 && k <= 96) || (k >= 123 && k <= 126) || /\p{P}/u.test(c); };
+function wordpiece(piece, vocab) {
+  if ([...piece].length > 100) return [vocab["[UNK]"]];
+  const out = []; let start = 0; const chars = [...piece];
+  while (start < chars.length) {
+    let end = chars.length, found = null;
+    while (start < end) {
+      const s = (start ? "##" : "") + chars.slice(start, end).join("");
+      if (s in vocab) { found = vocab[s]; break; }
+      end--;
+    }
+    if (found === null) return [vocab["[UNK]"]];
+    out.push(found); start = end;
+  }
+  return out;
+}
+function encode(words, vocab) {
+  const ids = [vocab["[CLS]"]], first = []; // first[i] = position of word i's first token
+  words.forEach((w, wi) => {
+    const norm = w.normalize("NFD").replace(/\p{Mn}/gu, "").toLowerCase();
+    const pieces = []; let cur = "";
+    for (const c of norm) { if (isPunct(c)) { if (cur) pieces.push(cur); pieces.push(c); cur = ""; } else cur += c; }
+    if (cur) pieces.push(cur);
+    pieces.forEach((p, pi) => { const toks = wordpiece(p, vocab); if (pi === 0) first[wi] = ids.length; ids.push(...toks); });
+  });
+  ids.push(vocab["[SEP]"]);
+  return { ids, first };
+}
+
+const SLOT_TAGS = ["O", "B-CITY", "I-CITY", "B-WHEN", "I-WHEN", "B-TITLE", "I-TITLE"];
+function spans(words, tags, kind) {
+  const out = []; let cur = [];
+  words.forEach((w, i) => {
+    const t = tags[i];
+    if (t === `B-${kind}`) { if (cur.length) out.push(cur.join(" ")); cur = [w]; }
+    else if (t === `I-${kind}` && cur.length) cur.push(w);
+    else { if (cur.length) out.push(cur.join(" ")); cur = []; }
+  });
+  if (cur.length) out.push(cur.join(" "));
+  return out;
+}
+
+let routerPromise;
+function router() { return (routerPromise ||= loadRouter()); }
+function loadScript(src) { return new Promise((ok, bad) => { const s = document.createElement("script"); s.src = src; s.onload = ok; s.onerror = () => bad(new Error("could not load " + src)); document.head.append(s); }); }
+
+async function loadRouter() {
+  await loadScript(ORT + "ort.min.js");
+  window.ort.env.wasm.wasmPaths = ORT;
+  window.ort.env.wasm.numThreads = 1;
+  const [meta, tok, buf] = await Promise.all([
+    fetch(MODEL + "meta.json").then((r) => r.json()),
+    fetch(MODEL + "tokenizer.json").then((r) => r.json()),
+    fetch(MODEL + "model.int8.onnx").then((r) => r.arrayBuffer()),
+  ]);
+  const session = await window.ort.InferenceSession.create(new Uint8Array(buf), { executionProviders: ["wasm"] });
+  const vocab = tok.model.vocab;
+  const tools = [...new Set(Object.values(meta.tool_of_intent))].sort();
+  const toolIdx = meta.intents.map((n) => tools.indexOf(meta.tool_of_intent[n]));
+  const ACTION = ["WEATHER", "SET_REMINDER", "SAVE_NOTE"];
+
+  async function run(words) {
+    const { ids, first } = encode(words, vocab);
+    const n = ids.length;
+    const out = await session.run({
+      input_ids: new window.ort.Tensor("int64", BigInt64Array.from(ids.map(BigInt)), [1, n]),
+      attention_mask: new window.ort.Tensor("int64", new BigInt64Array(n).fill(1n), [1, n]),
+    });
+    const il = out.intent_logits.data, sl = out.slot_logits.data, nt = SLOT_TAGS.length;
+    const mx = Math.max(...il); const e = Array.from(il, (v) => Math.exp(v - mx)); const z = e.reduce((a, b) => a + b, 0);
+    const tp = new Array(tools.length).fill(0); let best = 0;
+    e.forEach((v, i) => { tp[toolIdx[i]] += v / z; if (v > e[best]) best = i; });
+    const tags = words.map((_, wi) => { const p = first[wi]; let k = 0; for (let j = 1; j < nt; j++) if (sl[p * nt + j] > sl[p * nt + k]) k = j; return SLOT_TAGS[k]; });
+    return { tp, tags, intent: meta.intents[best] };
+  }
+
+  const api = { meta };
+  // route() starts inference and finish() turns its result into a decision
+  api.route = (text) => { const words = clean(text); return { words, pending: words.length ? run(words) : null }; };
+  api.finish = async (pending) => {
+    const words = pending.words;
+    if (!words.length) return { tool: "UNSUPPORTED", confidence: 1, intent: "", path: "empty", args: {}, spans: [] };
+    const { tp, tags, intent } = await pending.pending;
+    let k = 0; tp.forEach((v, i) => { if (v > tp[k]) k = i; });
+    const tool = tools[k], conf = tp[k];
+    if (ACTION.includes(tool) && conf < meta.threshold) return { tool: "UNSUPPORTED", confidence: conf, intent, path: "abstain", args: {}, spans: [] };
+    const args = {};
+    if (tool === "WEATHER") args.city = spans(words, tags, "CITY")[0] || "";
+    if (tool === "SET_REMINDER") { args.when = spans(words, tags, "WHEN").join(" "); args.title = spans(words, tags, "TITLE")[0] || ""; }
+    const found = ["CITY", "WHEN", "TITLE"].flatMap((K) => spans(words, tags, K).map((t) => ({ kind: K.toLowerCase(), text: t })));
+    return { tool, confidence: conf, intent, path: "fast", args: Object.fromEntries(Object.entries(args).map(([a, b]) => [a, b])), spans: found };
+  };
+  return api;
+}
+
+/* ---------- tools (ports of jarvis/tools.py) ---------- */
+const WMO = { 0: "clear", 1: "mostly clear", 2: "partly cloudy", 3: "overcast", 45: "foggy", 48: "foggy", 51: "light drizzle", 53: "drizzle", 55: "heavy drizzle", 61: "light rain", 63: "rain", 65: "heavy rain", 71: "light snow", 73: "snow", 75: "heavy snow", 80: "rain showers", 81: "rain showers", 82: "violent showers", 95: "a thunderstorm", 96: "thunderstorm and hail", 99: "thunderstorm and hail" };
+const WORD_NUM = Object.fromEntries("zero one two three four five six seven eight nine ten eleven twelve".split(" ").map((w, i) => [w, String(i)]));
+const DAYPART = { morning: "9 am", afternoon: "3 pm", evening: "6 pm", night: "8 pm" };
+const MINUTES = { fifteen: "15", thirty: "30", "forty five": "45" };
+
+export function normalizeWhen(text) {
+  let t = text.toLowerCase().replaceAll(".", " ");
+  t = t.replace(/\b([ap]) m\b/g, "$1m").replace(/\bnext (\w+day)\b/g, "$1");
+  t = t.replace(/\bhalf past (\w+)\b/g, (_, w) => `${WORD_NUM[w] ?? w}:30`);
+  t = t.replace(/\btonight\b/g, "today night").replace(/\bthis (morning|afternoon|evening)\b/g, "today $1");
+  if (!/\d|\b[ap]m\b/.test(t)) for (const [part, clock] of Object.entries(DAYPART)) t = t.replace(new RegExp(`\\b${part}\\b`, "g"), clock);
+  t = t.split(/\s+/).filter(Boolean).map((w) => WORD_NUM[w] ?? w).join(" ");
+  t = t.replace(/\b(\d{1,2}) (\d{2}) ([ap]m)\b/g, "$1:$2 $3");
+  t = t.replace(/\b(\d{1,2}) (fifteen|thirty|forty five) ([ap]m)\b/g, (_, h, m, ap) => `${h}:${MINUTES[m]} ${ap}`);
+  return t.trim();
+}
+const HAS_TIME = /\d|noon|midnight|\bam\b|\bpm\b|\bin \w+ (?:minutes?|hours?)\b/;
+const LEAD = /^(?:(?:hey |ok |okay )?jarvis,? )?(?:please )?(?:remind me|set (?:a |an )?reminder|reminder)(?: to| about| that| for)? ?/;
+export function reminderTitle(text, when) {
+  let t = text.toLowerCase().trim().replace(LEAD, "");
+  for (const w of when.split(/\s+/).filter(Boolean)) t = t.replace(new RegExp(`\\b${w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`), " ");
+  const words = t.replaceAll(",", " ").split(/\s+/).filter(Boolean);
+  while (words.length && ["at", "on", "for", "by", "in", "from", "till", "until", "to", "and"].includes(words[words.length - 1])) words.pop();
+  return words.join(" ");
+}
+
+let chronoP;
+async function act(r, body) {
+  if (r.tool === "WEATHER") return weather(r.args.city || body.default_city);
+  if (r.tool === "SET_REMINDER") {
+    const when = r.args.when || "";
+    const derived = reminderTitle(body.text, when);
+    return reminder(when, derived && (!r.args.title || derived.includes(r.args.title)) ? derived : r.args.title || "");
+  }
+  if (r.tool === "SAVE_NOTE") return { reply: "Saved your note.", action: { type: "note", text: body.text } };
+  if (r.tool === "GENERAL_QA") return { reply: "General questions need a language model. This hosted copy runs entirely in your browser and has none. Run Jarvis locally and connect one, or ask for the weather, a reminder or a note.", action: null };
+  const hints = await (hintsP ||= fetch("hints.json").then((x) => x.json()).catch(() => ({})));
+  const hint = hints[r.intent];
+  return { reply: (hint ? `That sounds like a request to ${hint}, which I cannot do. ` : "I cannot do that. ") + "I can check the weather, set reminders and save notes.", action: null };
+}
+let hintsP;
+
+async function weather(city) {
+  if (!city) return { reply: "Which city should I check the weather for?", action: null };
+  try {
+    const g = await (await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1&format=json`)).json();
+    const hit = (g.results || [])[0];
+    if (!hit) return { reply: `I could not find a place called ${city}.`, action: null };
+    const f = await (await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${hit.latitude}&longitude=${hit.longitude}&current=temperature_2m,weather_code&daily=temperature_2m_max,temperature_2m_min&forecast_days=1&timezone=auto`)).json();
+    const place = hit.name + (hit.country ? `, ${hit.country}` : "");
+    return { reply: `In ${place} it is ${Math.round(f.current.temperature_2m)} degrees and ${WMO[f.current.weather_code] ?? "mixed conditions"}. Today's range is ${Math.round(f.daily.temperature_2m_min[0])} to ${Math.round(f.daily.temperature_2m_max[0])}.`, action: { type: "weather", place } };
+  } catch {
+    return { reply: "I could not reach the weather service. Try again in a moment.", action: null };
+  }
+}
+
+async function reminder(when, title) {
+  if (!when) return { reply: "When should I remind you?", action: null };
+  const norm = normalizeWhen(when);
+  const chrono = await (chronoP ||= import(CHRONO));
+  let at = chrono.parseDate(norm, new Date(), { forwardDate: true });
+  if (!at) return { reply: `I did not understand the time '${when}'. Try something like tomorrow at 3 pm.`, action: null };
+  if (!HAS_TIME.test(norm)) at.setHours(9, 0, 0, 0);
+  const label = title || "Reminder";
+  const spoken = at.toLocaleString(undefined, { weekday: "long", day: "numeric", month: "long", hour: "numeric", minute: "2-digit" });
+  return { reply: `Okay, I will remind you: ${label}, on ${spoken}.`, action: { type: "reminder", title: label, at: at.toISOString() } };
+}
+
+/* router only, no tools: used by the parity check against the Python router */
+export async function routeOnly(text) {
+  const r = await router();
+  return r.finish(r.route(text));
+}

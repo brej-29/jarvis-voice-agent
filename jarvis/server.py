@@ -77,7 +77,10 @@ async def chat(body: ChatIn):
         reply, action = await tools.weather(r.args.get("city") or body.default_city)
     elif r.tool == "SET_REMINDER":
         when = r.args.get("when", "")
-        title = r.args.get("title") or tools.reminder_title(body.text, when)
+        title = r.args.get("title", "")
+        derived = tools.reminder_title(body.text, when)
+        if derived and (not title or title in derived):  # the tagger often stops a word early ("call" for "call mum")
+            title = derived
         reply, action = tools.reminder(when, title, body.tz_offset_min)
     elif r.tool == "SAVE_NOTE":
         reply, action = tools.note(body.text)

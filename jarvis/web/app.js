@@ -1,3 +1,4 @@
+import { chat, health as engineHealth, STATIC } from "./engine.js";
 import { renderEvidence } from "./evidence.js";
 
 const $ = (s) => document.querySelector(s);
@@ -25,12 +26,12 @@ showTab();
 async function health() {
   const s = $("#status");
   try {
-    const h = await (await fetch("api/health")).json();
+    const h = await engineHealth();
     threshold = h.threshold;
-    s.textContent = "Router ready, running on this machine";
+    s.textContent = STATIC ? "Router ready, running in your browser" : "Router ready, running on this machine";
     s.className = "status ok";
   } catch {
-    s.textContent = "Router offline. Waking up can take up to a minute on the free host.";
+    s.textContent = STATIC ? "Loading the 23 MB router into your browser" : "Router offline. Check that the Jarvis app is running.";
     s.className = "status bad";
     setTimeout(health, 4000);
   }
@@ -137,16 +138,13 @@ async function send(text) {
   $("#text").value = "";
   const li = addSlip(text, null, true);
   try {
-    const res = await fetch("api/chat", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text, tz_offset_min: -new Date().getTimezoneOffset(), default_city: $("#city").value.trim(), history }) });
-    if (!res.ok) throw new Error(res.status);
-    const d = await res.json();
+    const d = await chat({ text, tz_offset_min: -new Date().getTimezoneOffset(), default_city: $("#city").value.trim(), history });
     fill(li, text, d);
     perform(d.action);
     history.push({ role: "user", content: text }, { role: "assistant", content: d.reply });
     speak(d.reply);
   } catch {
-    li.innerHTML = `<p class="said">${esc(text)}</p><p class="reply">The router did not answer. If this is the free hosted copy, it may be waking up: wait a few seconds and send again.</p>`;
+    li.innerHTML = `<p class="said">${esc(text)}</p><p class="reply">The router did not answer. In the hosted copy the model may still be loading: wait a few seconds and send again.</p>`;
   }
 }
 $("#form").addEventListener("submit", (e) => { e.preventDefault(); send($("#text").value); });

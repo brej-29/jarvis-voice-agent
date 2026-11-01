@@ -17,3 +17,5 @@ jobs:
         run: uv run ruff check .
       - name: Tests
         run: uv run pytest -q
+      - name: Static site builds
+        run: python packaging/build_pages.py "$RUNNER_TEMP/site"
