@@ -99,7 +99,10 @@ async def answer(text: str, history: list[dict] | None = None) -> str:
     headers = {"Authorization": f"Bearer {os.getenv('JARVIS_LLM_API_KEY', '')}"}
     msgs = [{"role": "system", "content": "You are Jarvis, a voice assistant. Answer in one or two short "
                                            "spoken sentences. No markdown."}]
-    msgs += (history or [])[-6:] + [{"role": "user", "content": text}]
+    # the browser supplies the history, so keep only plain user/assistant turns of bounded size
+    past = [{"role": h["role"], "content": str(h.get("content", ""))[:500]} for h in (history or [])[-6:]
+            if isinstance(h, dict) and h.get("role") in ("user", "assistant")]
+    msgs += past + [{"role": "user", "content": text}]
     async with httpx.AsyncClient(timeout=30) as c:
         r = await c.post(base.rstrip("/") + "/chat/completions", headers=headers,
                          json={"model": model, "messages": msgs, "max_tokens": 120, "temperature": 0.3})

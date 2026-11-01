@@ -3,9 +3,10 @@
 
 :root {
   --ground: #171b26; --panel: #1f2431; --raise: #272d3c; --line: #353c50;
-  --ink: #ece9e1; --mute: #9aa2b6; --faint: #6d7590;
+  --ink: #ece9e1; --mute: #9aa2b6; --faint: #8c94ab;
   --weather: #6cb6f0; --reminder: #f0b04a; --note: #7ed4a8; --qa: #b9a0f4; --no: #9aa2b6;
   --focus: #f0b04a;
+  --c-fast: #1fa391; --c-llm: #a47aeb; --c-base: #c47d1a;
   --display: "Bricolage Grotesque", "Segoe UI Variable Display", system-ui, sans-serif;
   --body: "Instrument Sans", "Segoe UI Variable Text", system-ui, sans-serif;
   --r: 14px;
@@ -15,9 +16,9 @@
 @media (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]) {
     --ground: #eef0f5; --panel: #ffffff; --raise: #f5f6fa; --line: #d5d9e5;
-    --ink: #1b2030; --mute: #566079; --faint: #7a839b;
+    --ink: #1b2030; --mute: #566079; --faint: #646d86;
     --weather: #1b78b8; --reminder: #b36b00; --note: #19815a; --qa: #6b4fc4; --no: #566079;
-    --focus: #b36b00; color-scheme: light;
+    --focus: #b36b00; --c-fast: #0b8a78; --c-llm: #7a52d1; --c-base: #b0700a; color-scheme: light;
   }
 }
 
@@ -126,9 +127,18 @@ main { padding: clamp(20px, 4vw, 44px) clamp(16px, 4vw, 40px); max-width: 1240px
 .chart .axis { stroke: var(--line); }
 .legend { display: flex; gap: 18px; flex-wrap: wrap; color: var(--mute); font-size: .9rem; }
 .legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
-.callout { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--reminder); border-radius: 10px; padding: 14px 18px; max-width: 70ch; }
+.callout { background: var(--panel); border: 1px solid color-mix(in srgb, var(--reminder) 45%, var(--line)); border-radius: 10px; padding: 14px 18px; max-width: 70ch; }
 .foot { padding: 32px clamp(16px, 4vw, 40px) 48px; color: var(--mute); font-size: .88rem; max-width: 1240px; margin: 0 auto; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+.ev h3 { font: 650 1.05rem var(--display); margin-top: 8px; }
+.ev p { max-width: 68ch; }
+.tv { margin-top: 4px; }
+.tv summary { cursor: pointer; color: var(--mute); font-size: .9rem; }
+.tv table { margin-top: 10px; }
+.plain { padding-left: 1.1em; display: grid; gap: 10px; max-width: 70ch; margin: 0; }
+.near { color: var(--reminder); font-weight: 650; }
+.ev .callout { margin-top: 4px; }

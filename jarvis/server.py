@@ -32,11 +32,18 @@ _hosts += [h.strip() for h in os.getenv("JARVIS_ALLOWED_HOSTS", "").split(",") i
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=_hosts)
 
 
+@app.middleware("http")
+async def revalidate(request, call_next):
+    resp = await call_next(request)
+    resp.headers.setdefault("Cache-Control", "no-cache")  # always revalidate, so a new build is picked up
+    return resp
+
+
 class ChatIn(BaseModel):
     text: str = Field(min_length=1, max_length=500)
     tz_offset_min: int = 0
     default_city: str = ""
-    history: list[dict] = []
+    history: list[dict] = Field(default=[], max_length=20)
 
 
 def route_json(r) -> dict:

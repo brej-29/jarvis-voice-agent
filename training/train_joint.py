@@ -5,11 +5,12 @@ Test data is never read here. The abstention threshold is chosen on dev.
 """
 
 import argparse
+import difflib
 import json
 import random
 import re
-import shutil
 import time
+import zlib
 from pathlib import Path
 
 import numpy as np
@@ -51,6 +52,31 @@ def load_split(split):
         if w:
             rows.append((w, t, r["intent"]))
     return rows
+
+
+def asr_rows(path: str, train_rows):
+    """Transcribed recordings with tags carried over from the clean annotation by word alignment."""
+    by_text = {}
+    for w, t, i in train_rows:
+        by_text.setdefault(" ".join(w), (w, t, i))
+    rows, dev = [], []
+    for o in json.loads(Path(path).read_text(encoding="utf-8")):
+        src = by_text.get(" ".join(clean(o["gold_text"])))
+        hyp = clean(o["asr_text"])
+        if not src or not hyp:
+            continue
+        w, t, intent = src
+        tags = ["O"] * len(hyp)
+        for op, a0, a1, b0, b1 in difflib.SequenceMatcher(None, w, hyp, autojunk=False).get_opcodes():
+            if op == "equal" or (op == "replace" and a1 - a0 == b1 - b0):
+                tags[b0:b1] = t[a0:a1]
+        # an I- tag must follow a tag of the same kind
+        for k, x in enumerate(tags):
+            if x.startswith("I-") and (k == 0 or tags[k - 1][2:] != x[2:]):
+                tags[k] = "B-" + x[2:]
+        # split by sentence so both recordings of a sentence land on the same side
+        (dev if zlib.crc32(o["gold_text"].encode()) % 10 == 0 else rows).append((hyp, tags, intent))
+    return rows, dev
 
 
 class Net(nn.Module):
@@ -100,6 +126,7 @@ def main():
     ap.add_argument("--lr", type=float, default=1e-4)
     ap.add_argument("--bs", type=int, default=64)
     ap.add_argument("--out", default="models/joint")
+    ap.add_argument("--asr-train", help="Whisper transcripts of SLURP train recordings (see jarvis.bench.asr_train)")
     ap.add_argument("--no-augment", action="store_true", help="MASSIVE only (the pre-registered J1 setup)")
     a = ap.parse_args()
     random.seed(a.seed); np.random.seed(a.seed); torch.manual_seed(a.seed)
@@ -110,6 +137,11 @@ def main():
         n_tr, n_dev = synth.notes(a.seed)
         train = synth.wake_word(train, random.Random(a.seed)) + n_tr + synth.greetings()
         devset = devset + n_dev
+    if a.asr_train:
+        noisy, noisy_dev = asr_rows(a.asr_train, train)  # dev part only tunes the abstention threshold
+        devset = devset + noisy_dev
+        train = train + noisy
+        print("asr rows train", len(noisy), "dev", len(noisy_dev))
     intents = sorted({r[2] for r in train})
     tool_of = {i: ("SAVE_NOTE" if i == "note_save" else data.TOOL_OF_INTENT.get(i, "UNSUPPORTED")) for i in intents}
     tok = AutoTokenizer.from_pretrained(BACKBONE)

@@ -13,12 +13,33 @@ from jarvis.schema import Route
 
 MODEL_DIR = Path(__file__).resolve().parents[2] / "models" / "joint"
 SLOT_TAGS = ("O", "B-CITY", "I-CITY", "B-WHEN", "I-WHEN", "B-TITLE", "I-TITLE")
-_PUNCT = re.compile(r"[^\w\s'-]")
+_PUNCT = re.compile(r"[^\w\s']")
+_SMALL = ("zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen "
+          "sixteen seventeen eighteen nineteen").split()
+_TENS = "x x twenty thirty forty fifty sixty seventy eighty ninety".split()
+_CLOCK = re.compile(r"(?<![\d:])(\d{1,2}):(\d{2})(?![\d:])")
+_NUM = re.compile(r"(?<![\d.])\d{1,3}(?![\d.])")
+
+
+def num_words(n: int) -> str:
+    if n < 20:
+        return _SMALL[n]
+    if n < 100:
+        return _TENS[n // 10] + (" " + _SMALL[n % 10] if n % 10 else "")
+    return _SMALL[n // 100] + " hundred" + (" " + num_words(n % 100) if n % 100 else "")
+
+
+def _clock(m: re.Match) -> str:
+    h, mm = int(m.group(1)), int(m.group(2))
+    return num_words(h) + ("" if mm == 0 else " oh " + num_words(mm) if mm < 10 else " " + num_words(mm))
 
 
 def clean(text: str) -> list[str]:
-    """Lowercase and strip punctuation so speech-recognizer output looks like training text."""
-    return _PUNCT.sub(" ", text.lower()).split()
+    """Lowercase, spell small numbers out and strip punctuation, so recogniser output (which writes
+    "5:30 p.m." and "7-day") looks like the training text ("five thirty p m", "seven day")."""
+    t = _CLOCK.sub(_clock, text.lower().replace("-", " "))
+    t = _NUM.sub(lambda m: num_words(int(m.group(0))), t)
+    return _PUNCT.sub(" ", t).split()
 
 
 def spans(words: list[str], tags: list[str], kind: str) -> list[str]:

@@ -20,10 +20,10 @@ def build(system: str, model: str | None, gpu: int, **kw):
         from jarvis.routers.rules import RuleRouter
 
         return RuleRouter()
-    if system in ("l0", "l1"):
+    if system in ("l0", "l0x", "l1"):
         from jarvis.routers.llm import LlamaRouter
 
-        return LlamaRouter(model, mode="v1" if system == "l0" else "min", n_gpu_layers=gpu)
+        return LlamaRouter(model, mode={"l0": "v1", "l0x": "v1x"}.get(system, "min"), n_gpu_layers=gpu)
     if system == "m1":
         from jarvis.routers.linear import LinearRouter
 
@@ -65,6 +65,8 @@ def main():
     ap.add_argument("--tag", default="")
     ap.add_argument("--quirky", action="store_true", help="sensitivity: include general_quirky")
     ap.add_argument("--limit", type=int)
+    ap.add_argument("--asr", help="Whisper transcript JSON from jarvis.bench.asr")
+    ap.add_argument("--asr-clean", action="store_true", help="same items, gold text instead of transcripts")
     ap.add_argument("--threshold", type=float)
     ap.add_argument("--llm", help="GGUF path for the cascade fallback")
     ap.add_argument("--rate", type=float, default=0.15, help="target dev fallback rate for c1")
@@ -73,6 +75,13 @@ def main():
     items = data.load(a.split, include_quirky=a.quirky)
     if a.set == "subset":
         items = data.llm_subset(items)
+    if a.asr:
+        from dataclasses import replace
+
+        rec = {o["id"]: o for o in json.loads(Path(a.asr).read_text(encoding="utf-8"))}
+        by_id = {i.id: i for i in data.load("test")}
+        items = [replace(by_id[k], text=o["gold_text" if a.asr_clean else "asr_text"]) for k, o in rec.items()]
+        a.tag = a.tag or ("asrclean" if a.asr_clean else "asr")
     if a.limit:
         items = items[: a.limit]
     router = build(a.system, a.model, a.gpu, threshold=a.threshold, llm=a.llm, rate=a.rate)

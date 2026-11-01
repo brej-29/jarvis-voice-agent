@@ -26,3 +26,12 @@ def test_weather_needs_a_city():
 
     reply, action = asyncio.run(tools.weather(""))
     assert action is None and "Which city" in reply
+
+
+def test_clean_spells_out_recogniser_digits():
+    from jarvis.routers.joint import clean
+
+    assert clean("Block 1 hour from 10 tomorrow.") == "block one hour from ten tomorrow".split()
+    assert clean("Wake me at 5:30 p.m.") == "wake me at five thirty p m".split()
+    assert clean("the 7-day forecast") == "the seven day forecast".split()
+    assert clean("What's the weather?") == ["what's", "the", "weather"]

@@ -8,7 +8,7 @@ L1 is the fair baseline: short prompt, few-shot, JSON-schema constrained decodin
 import json
 import re
 
-from jarvis.legacy.v1_prompt import V1_ROUTER_SYSTEM
+from jarvis.legacy.v1_prompt import V1_CONTRACT, V1_ROUTER_SYSTEM
 from jarvis.schema import TOOLS, Route
 
 V1_TOOLS = ("WEATHER", "SET_REMINDER", "SAVE_NOTE", "GENERAL_QA")
@@ -43,7 +43,7 @@ SCHEMA = {
 
 def _json(raw: str) -> dict:
     raw = raw.strip()
-    m = re.search(r"\{.*\}", raw, re.S)
+    m = re.search(r"\{.*\}", raw, re.DOTALL)
     return json.loads(m.group(0) if m else raw)
 
 
@@ -73,9 +73,13 @@ class LlamaRouter:
 
     def __init__(self, model_path: str, mode: str = "min", n_gpu_layers: int = 0, n_ctx: int = 2048,
                  n_threads: int | None = None):
+        import os
+
+        for d in filter(None, os.environ.get("JARVIS_DLL_DIRS", "").split(os.pathsep)):
+            os.add_dll_directory(d)  # Windows: CUDA runtime DLLs for the GPU build of llama.cpp
         from llama_cpp import Llama
 
-        self.mode, self.name = mode, f"{'L0' if mode == 'v1' else 'L1'}"
+        self.mode, self.name = mode, {"v1": "L0", "v1x": "L0x"}.get(mode, "L1")
         self.llm = Llama(model_path=model_path, n_ctx=n_ctx, n_gpu_layers=n_gpu_layers,
                          n_threads=n_threads, verbose=False, seed=0)
 
@@ -84,7 +88,7 @@ class LlamaRouter:
         return out["choices"][0]["message"]["content"] or ""
 
     def route(self, text: str) -> Route:
-        if self.mode == "v1":
+        if self.mode in ("v1", "v1x"):
             return self._route_v1(text)
         msgs = [{"role": "system", "content": MIN_SYSTEM}]
         for u, a in SHOTS:
@@ -98,7 +102,8 @@ class LlamaRouter:
             return Route("GENERAL_QA", valid=False)
 
     def _route_v1(self, text: str) -> Route:
-        base = [{"role": "system", "content": V1_ROUTER_SYSTEM}]
+        # v1x: the V1 contract without the pasted project-doc excerpts (ablation H3)
+        base = [{"role": "system", "content": V1_ROUTER_SYSTEM if self.mode == "v1" else V1_CONTRACT}]
         raw = self._chat(base + [{"role": "user", "content": text}], temperature=0.8, max_tokens=256)
         try:
             return parse_v1(raw)

@@ -19,6 +19,24 @@ from jarvis.bench import data
 SLURP = data.RAW / "slurp" / "test0.parquet"
 
 
+def whisper(model: str, device: str = "cpu"):
+    """faster-whisper model. On Windows the CUDA DLLs shipped inside torch are reused for the GPU."""
+    import os
+    import sys
+
+    if device == "cuda":
+        lib = Path(sys.prefix) / "Lib" / "site-packages" / "torch" / "lib"
+        os.add_dll_directory(str(lib))
+        os.environ["PATH"] = str(lib) + os.pathsep + os.environ["PATH"]
+
+    from faster_whisper import WhisperModel
+    from huggingface_hub import snapshot_download
+
+    # a plain local copy avoids the symlink privilege that Windows hub caches need
+    local = snapshot_download(f"Systran/faster-whisper-{model}", local_dir=str(data.RAW / "whisper" / model))
+    return WhisperModel(local, device=device, compute_type="float16" if device == "cuda" else "int8")
+
+
 def pick(seed: int = 0, per_tool: int = 100, unsupported: int = 200):
     train_dev = {i.text for s in ("train", "dev") for i in data.load(s)}
     test = {}
@@ -34,11 +52,11 @@ def main():
     import jiwer
     import pyarrow.parquet as pq
     import soundfile as sf
-    from faster_whisper import WhisperModel
 
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", default="base.en")
     ap.add_argument("--limit", type=int)
+    ap.add_argument("--device", default="cpu")
     a = ap.parse_args()
     by_text, rng, per_tool, unsup = pick()
     f = pq.ParquetFile(SLURP)
@@ -56,7 +74,7 @@ def main():
     if a.limit:
         chosen = chosen[: a.limit]
     print(len(rows), "usable sentences;", len(chosen), "chosen")
-    wm = WhisperModel(a.model, device="cpu", compute_type="int8")
+    wm = whisper(a.model, a.device)
     out = []
     for n, s in enumerate(chosen):
         audio, sr = sf.read(io.BytesIO(rows[s]), dtype="float32")

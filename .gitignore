@@ -14,3 +14,5 @@ data/raw/
 models/*_seed*/
 models/**/*.fp32.onnx
 .claude/
+.venv-gpu/
+bench/results/*_th*.preds.jsonl

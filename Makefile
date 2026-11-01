@@ -7,8 +7,10 @@ LLM05 = data/raw/models/qwen2.5-0.5b-instruct-q4_k_m.gguf
 
 setup:
 	uv venv --python 3.11 .venv
-	uv pip install --python $(PY) -e ".[train,eval,dev]" --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu --index-strategy unsafe-best-match
 	uv pip install --python $(PY) torch --index-url https://download.pytorch.org/whl/cu124
+	uv pip install --python $(PY) -e ".[train,eval,dev]"
+	# one package from one extra index, no dependency resolution against it (avoids dependency confusion)
+	uv pip install --python $(PY) llama-cpp-python --no-deps --only-binary :all: --index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
 
 test:
 	$(PY) -m ruff check . && $(PY) -m pytest -q

@@ -8,7 +8,7 @@ import numpy as np
 from jarvis.schema import ACTION_TOOLS, NO_ACTION, action_view
 
 VIEW = (*ACTION_TOOLS, NO_ACTION)
-_WORDS = "zero one two three four five six seven eight nine ten eleven twelve".split()
+_WORDS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve"]
 _NUM = {w: str(i) for i, w in enumerate(_WORDS)}
 _BASE = datetime(2026, 1, 5, 9, 0)
 

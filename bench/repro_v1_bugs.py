@@ -26,7 +26,7 @@ def main():
     with tempfile.TemporaryDirectory() as tmp:
         extract(Path(tmp))
         sys.path.insert(0, str(Path(tmp) / "backend"))
-        from app.routers import chat  # noqa: E402
+        from app.routers import chat
 
         try:
             chat._handle_save_note_tool({"title": "milk", "content": "buy milk"}, [])
