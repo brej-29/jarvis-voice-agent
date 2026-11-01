@@ -8,11 +8,19 @@ Settings come from the environment or a `.env` file (never committed, never sent
     LLM_PRICE_OUT_PER_M  USD per million output tokens (optional)
     MONTHLY_BUDGET_USD   stop calling the model once this much has been spent (optional)
     LLM_MAX_CALLS_PER_DAY   hard cap on calls per day, default 300
+    JARVIS_SPEND_FILE    where the spend ledger lives (default .jarvis_spend.json)
+    JARVIS_ENV_FILE      an explicit .env path
 The older JARVIS_LLM_BASE_URL / JARVIS_LLM_MODEL / JARVIS_LLM_API_KEY names still work.
+
+The spend guard fails closed: a call is counted and persisted before it is made, the ledger is written
+atomically, and an unreadable or unwritable ledger blocks calls instead of letting them through.
 """
 
 import json
 import os
+import sys
+import tempfile
+import threading
 from collections.abc import AsyncIterator
 from datetime import date
 from pathlib import Path
@@ -22,12 +30,18 @@ import httpx
 DEFAULT_MODEL = "auto/best-free"  # a free OmniRoute combo, see D:/Project/models.md
 SYSTEM = ("You are Jarvis, a voice assistant. Answer in one or two short spoken sentences. "
           "No markdown, no lists, no emoji.")
-SPEND_FILE = Path(os.getenv("JARVIS_SPEND_FILE", ".jarvis_spend.json"))
+MAX_TOKENS = 200
 
 
 def load_dotenv(path: Path | None = None) -> None:
-    """Minimal .env reader: KEY=VALUE lines, existing environment variables win."""
-    for p in [path] if path else [Path.cwd() / ".env", Path(__file__).resolve().parents[1] / ".env"]:
+    """Minimal .env reader: KEY=VALUE lines, existing environment variables win.
+
+    Only files that belong to the application are read (an explicit path, JARVIS_ENV_FILE, the folder
+    holding jarvis.exe, or the repository root). The working directory is deliberately not searched, so a
+    stray .env in whatever folder you launch from cannot redirect the endpoint or the API key."""
+    here = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parents[1]
+    candidates = [path] if path else [Path(os.environ["JARVIS_ENV_FILE"])] if os.getenv("JARVIS_ENV_FILE") else [here / ".env"]
+    for p in candidates:
         if p and p.is_file():
             for line in p.read_text(encoding="utf-8").splitlines():
                 line = line.strip()
@@ -57,23 +71,61 @@ def settings() -> dict:
             "max_calls": int(_num("LLM_MAX_CALLS_PER_DAY") or 300)}
 
 
-def _ledger() -> dict:
-    try:
-        d = json.loads(SPEND_FILE.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        d = {}
+# ---------- spend ledger ----------
+class LedgerError(Exception):
+    """The ledger cannot be trusted (unreadable or unwritable), so calls must stop."""
+
+
+_LOCK = threading.Lock()
+_MEM: dict = {}  # in-process floor: what this process has counted, whatever the disk says
+
+
+def spend_file() -> Path:  # resolved on every use, after .env has been loaded
+    return Path(os.getenv("JARVIS_SPEND_FILE") or ".jarvis_spend.json")
+
+
+def _read() -> dict:
+    p = spend_file()
+    d: dict = {}
+    if p.exists():
+        try:
+            d = json.loads(p.read_text(encoding="utf-8"))
+            if not isinstance(d, dict):
+                raise TypeError("ledger is not an object")
+        except (OSError, ValueError, TypeError) as exc:
+            raise LedgerError(f"cannot read {p}") from exc
     month, today = date.today().strftime("%Y-%m"), date.today().isoformat()
     if d.get("month") != month:
         d["month"], d["usd"] = month, 0.0
     if d.get("day") != today:
         d["day"], d["calls"] = today, 0
+    if _MEM.get("month") == month:
+        d["usd"] = max(d.get("usd", 0.0), _MEM.get("usd", 0.0))
+    if _MEM.get("day") == today:
+        d["calls"] = max(d.get("calls", 0), _MEM.get("calls", 0))
     return d
 
 
+def _write(d: dict) -> None:
+    _MEM.update(d)
+    p = spend_file()
+    try:
+        fd, tmp = tempfile.mkstemp(dir=p.parent if str(p.parent) else ".", prefix=".spend-", suffix=".tmp")
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(d, f)
+        os.replace(tmp, p)  # atomic, so a crash never leaves a half-written ledger
+    except OSError as exc:
+        raise LedgerError(f"cannot write {p}") from exc
+
+
 def status() -> dict:
-    s, d = settings(), _ledger()
+    s = settings()
+    try:
+        d, ok = _read(), True
+    except LedgerError:
+        d, ok = {}, False
     return {"connected": bool(s["endpoint"]), "model": s["model"], "spent_usd": round(d.get("usd", 0.0), 4),
-            "budget_usd": s["budget"] or None, "calls_today": d.get("calls", 0)}
+            "budget_usd": s["budget"] or None, "calls_today": d.get("calls", 0), "ledger_ok": ok}
 
 
 def _blocked(s: dict, d: dict) -> str:
@@ -84,14 +136,41 @@ def _blocked(s: dict, d: dict) -> str:
     return ""
 
 
-def _record(s: dict, tokens_in: int, tokens_out: int) -> None:
-    d = _ledger()
-    d["calls"] = d.get("calls", 0) + 1
-    d["usd"] = d.get("usd", 0.0) + (tokens_in * s["price_in"] + tokens_out * s["price_out"]) / 1e6
-    try:
-        SPEND_FILE.write_text(json.dumps(d), encoding="utf-8")
-    except OSError:
-        pass
+LEDGER_BLOCK = "I cannot track my language model spend right now, so I will not call it. Check the ledger file."
+
+
+def _cost(s: dict, tokens_in: float, tokens_out: float) -> float:
+    return (tokens_in * s["price_in"] + tokens_out * s["price_out"]) / 1e6
+
+
+def reserve(s: dict, prompt_chars: int) -> tuple[str, float]:
+    """Check the caps and count the call in one step, before anything is sent. Returns (block message, reserved USD).
+
+    There is no await between the check and the write, and a lock covers threads, so two requests cannot both
+    pass the same remaining budget."""
+    with _LOCK:
+        try:
+            d = _read()
+            if msg := _blocked(s, d):
+                return msg, 0.0
+            reserved = _cost(s, prompt_chars / 4, MAX_TOKENS)  # worst case: a full-length answer
+            d["calls"] = d.get("calls", 0) + 1
+            d["usd"] = d.get("usd", 0.0) + reserved
+            _write(d)
+            return "", reserved
+        except LedgerError:
+            return LEDGER_BLOCK, 0.0
+
+
+def settle(s: dict, reserved: float, tokens_in: float, tokens_out: float) -> None:
+    """Replace the reservation with the real cost. Runs on every exit path, including cancellation."""
+    with _LOCK:
+        try:
+            d = _read()
+            d["usd"] = max(0.0, d.get("usd", 0.0) - reserved + _cost(s, tokens_in, tokens_out))
+            _write(d)
+        except LedgerError:
+            _MEM["usd"] = max(0.0, _MEM.get("usd", 0.0) - reserved + _cost(s, tokens_in, tokens_out))
 
 
 def _messages(text: str, history: list[dict] | None) -> list[dict]:
@@ -109,14 +188,17 @@ FAILED = "My language model did not answer. Try again in a moment."
 async def stream_answer(text: str, history: list[dict] | None = None,
                         client: httpx.AsyncClient | None = None) -> AsyncIterator[str]:
     """Yield the reply in pieces. Never raises: failures become a spoken message."""
-    s, d = settings(), _ledger()
+    s = settings()
     if not s["endpoint"]:
         yield NOT_CONNECTED
         return
-    if msg := _blocked(s, d):
+    messages = _messages(text, history)
+    prompt_chars = sum(len(m["content"]) for m in messages)
+    msg, reserved = reserve(s, prompt_chars)
+    if msg:
         yield msg
         return
-    body = {"model": s["model"], "messages": _messages(text, history), "max_tokens": 200,
+    body = {"model": s["model"], "messages": messages, "max_tokens": MAX_TOKENS,
             "temperature": 0.3, "stream": True, "stream_options": {"include_usage": True}}
     headers = {"Authorization": f"Bearer {s['key']}"} if s["key"] else {}
     out_chars, usage = 0, None
@@ -141,10 +223,9 @@ async def stream_answer(text: str, history: list[dict] | None = None,
                         yield piece
     except (httpx.HTTPError, ValueError, KeyError):
         yield FAILED
-        return
-    prompt_chars = sum(len(m["content"]) for m in body["messages"])
-    _record(s, (usage or {}).get("prompt_tokens") or prompt_chars // 4,
-            (usage or {}).get("completion_tokens") or out_chars // 4)
+    finally:  # also reached on cancellation or when the consumer stops early
+        settle(s, reserved, (usage or {}).get("prompt_tokens") or prompt_chars / 4,
+               (usage or {}).get("completion_tokens") or out_chars / 4)
 
 
 async def answer(text: str, history: list[dict] | None = None) -> str:

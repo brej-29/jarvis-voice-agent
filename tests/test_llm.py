@@ -25,7 +25,8 @@ def collect(client):
 
 
 def setup(monkeypatch, tmp_path, **env):
-    monkeypatch.setattr(llm, "SPEND_FILE", tmp_path / "spend.json")
+    monkeypatch.setenv("JARVIS_SPEND_FILE", str(tmp_path / "spend.json"))
+    llm._MEM.clear()
     for k in ("LLM_ENDPOINT", "LLM_API_KEY", "LLM_MODEL", "MONTHLY_BUDGET_USD", "LLM_PRICE_IN_PER_M",
               "LLM_PRICE_OUT_PER_M", "JARVIS_LLM_BASE_URL", "JARVIS_LLM_MODEL", "JARVIS_LLM_API_KEY"):
         monkeypatch.delenv(k, raising=False)
@@ -74,3 +75,48 @@ def test_not_connected_and_http_error(monkeypatch, tmp_path):
     setup(monkeypatch, tmp_path, LLM_ENDPOINT="http://x/v1")
     client = httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(500)))
     assert "".join(collect(client)) == llm.FAILED
+
+
+def test_unreadable_ledger_fails_closed(monkeypatch, tmp_path):
+    setup(monkeypatch, tmp_path, LLM_ENDPOINT="http://x/v1")
+    (tmp_path / "spend.json").write_text("{not json")
+
+    def handler(request):
+        raise AssertionError("must not call the model")
+
+    out = "".join(collect(httpx.AsyncClient(transport=httpx.MockTransport(handler))))
+    assert out == llm.LEDGER_BLOCK and llm.status()["ledger_ok"] is False
+
+
+def test_unwritable_ledger_fails_closed(monkeypatch, tmp_path):
+    setup(monkeypatch, tmp_path, LLM_ENDPOINT="http://x/v1")
+    monkeypatch.setenv("JARVIS_SPEND_FILE", str(tmp_path / "missing_dir" / "spend.json"))
+
+    def handler(request):
+        raise AssertionError("must not call the model")
+
+    assert "".join(collect(httpx.AsyncClient(transport=httpx.MockTransport(handler)))) == llm.LEDGER_BLOCK
+
+
+def test_call_is_counted_even_when_upstream_fails_or_stops_early(monkeypatch, tmp_path):
+    setup(monkeypatch, tmp_path, LLM_ENDPOINT="http://x/v1", LLM_MAX_CALLS_PER_DAY="2")
+    def fail():
+        return httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(500)))
+
+    collect(fail())
+    collect(fail())
+    assert llm.status()["calls_today"] == 2
+    assert "limit of language model calls" in "".join(collect(fail()))  # third call refused, upstream untouched
+
+
+def test_dotenv_ignores_the_working_directory(monkeypatch, tmp_path):
+    setup(monkeypatch, tmp_path)
+    (tmp_path / ".env").write_text("LLM_ENDPOINT=http://evil.example/v1\n")
+    monkeypatch.chdir(tmp_path)  # a .env in the launch folder is not read ...
+    monkeypatch.setenv("JARVIS_ENV_FILE", str(tmp_path / "elsewhere" / ".env"))  # (the app's own file is somewhere else)
+    llm.load_dotenv()
+    assert llm.settings()["endpoint"] == ""
+    monkeypatch.setenv("JARVIS_ENV_FILE", str(tmp_path / ".env"))  # ... unless it is named explicitly
+    llm.load_dotenv()
+    assert "evil.example" in llm.settings()["endpoint"]
+    monkeypatch.delenv("LLM_ENDPOINT")

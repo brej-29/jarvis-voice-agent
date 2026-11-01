@@ -148,7 +148,7 @@ LLM_PRICE_IN_PER_M=0          # USD per million tokens, so the budget guard can 
 LLM_PRICE_OUT_PER_M=0
 ```
 
-Answers stream into the decision slip as they arrive (first token in about 1.2 s with `auto/best-free` on my setup). The key never leaves the server, calls are capped at 300 a day, and the spend ledger lives in `.jarvis_spend.json`. With no endpoint set, general questions say so and everything else works.
+Answers stream into the decision slip as they arrive (first token in about 1.2 s with `auto/best-free` on my setup). The key never leaves the server, calls are capped at 300 a day, and the spend ledger lives in `.jarvis_spend.json`. The spend guard fails closed: each call is counted and saved (atomically) before it is made, so a crash or a cancelled stream cannot undercount, and an unreadable or unwritable ledger blocks calls instead of letting them through. `.env` is read from the repository root (or next to `jarvis.exe`, or the path in `JARVIS_ENV_FILE`), never from whatever folder you launch from. With no endpoint set, general questions say so and everything else works.
 
 **Windows exe:** `make exe` builds `dist/jarvis.exe` with PyInstaller (UI and model inside, 63 MB, no Python needed). It opens your browser on `http://127.0.0.1:8765`. A build made from this commit was smoke-tested over HTTP (health, reminder, greeting). The file is unsigned, so Windows SmartScreen may warn.
 
