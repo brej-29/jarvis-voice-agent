@@ -111,6 +111,13 @@ body[data-state="thinking"] .say::after { opacity: 1; animation: sweep 1.6s line
 .prefs summary { cursor: pointer; font-weight: 550; color: var(--ink); }
 .inline { display: flex; gap: 10px; align-items: center; margin-top: 12px; }
 .inline input[type=text] { flex: 1; height: 38px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); padding: 0 10px; font: inherit; }
+.inline select, .inline input[type=range] { flex: 1; min-width: 0; height: 38px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); padding: 0 8px; font: inherit; }
+.inline input[type=range] { padding: 0; accent-color: var(--reminder); }
+.inline input[type=password] { flex: 1; height: 38px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); padding: 0 10px; font: inherit; }
+.byok { margin-top: 20px; padding-top: 14px; border-top: 1px solid var(--line); }
+.byok h3 { font: 650 1rem var(--display); color: var(--ink); margin: 0 0 6px; }
+.byok p { font-size: .88rem; }
+.send.small { height: 38px; padding: 0 18px; border-radius: 12px; }
 .saved { margin-top: 14px; display: grid; gap: 8px; font-size: .92rem; }
 .saved .item { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 8px 12px; color: var(--ink); }
 .saved .item small { display: block; color: var(--mute); }

@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from jarvis import llm, tools
+from jarvis.omniroute import manager
 from jarvis.routers.joint import JointRouter
 
 llm.load_dotenv()
@@ -23,7 +24,9 @@ state: dict = {}
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     state["router"] = JointRouter()
+    manager.ensure_in_background(llm.settings()["endpoint"])  # starts OmniRoute only if it is local and not running
     yield
+    manager.stop()  # stops it only if this run started it
 
 
 app = FastAPI(title="Jarvis", version="2.0.0", lifespan=lifespan)
@@ -62,7 +65,7 @@ def run_router(text: str):
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "router": "joint-int8", "threshold": state["router"].threshold, "llm": llm.status()}
+    return {"status": "ok", "router": "joint-int8", "threshold": state["router"].threshold, "llm": {**llm.status(), "omniroute": {"state": manager.state, "detail": manager.detail}}}
 
 
 @app.post("/api/route")

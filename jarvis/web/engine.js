@@ -11,7 +11,8 @@ const MODEL = "model/";
 export async function health() {
   if (!STATIC) return (await fetch("api/health")).json();
   const r = await router();
-  return { status: "ok", threshold: r.meta.threshold, llm: { connected: false } };
+  const k = byok.get();
+  return { status: "ok", threshold: r.meta.threshold, llm: k ? { connected: true, model: `${PROVIDERS[k.provider].label} ${k.model}` } : { connected: false } };
 }
 
 /* Streaming chat. `on.route(route)` fires as soon as the router has decided, `on.token(text)` for each
@@ -43,7 +44,7 @@ export async function chat(body, on = {}) {
   const route = await r.finish(r.route(body.text));
   route.ms = performance.now() - t0;
   on.route?.(route);
-  const { reply, action } = await act(route, body);
+  const { reply, action } = await act(route, body, on);
   return { reply, action, route };
 }
 
@@ -187,7 +188,7 @@ export function reminderTitle(text, when) {
 
 const GREETING = "Hello. I can check the weather, set reminders and save notes. What do you need?";
 let chronoP;
-async function act(r, body) {
+async function act(r, body, on = {}) {
   if (r.tool === "WEATHER") return weather(r.args.city || body.default_city);
   if (r.tool === "SET_REMINDER") {
     const when = r.args.when || "";
@@ -196,7 +197,7 @@ async function act(r, body) {
   }
   if (r.tool === "SAVE_NOTE") return { reply: "Saved your note.", action: { type: "note", text: body.text } };
   if (r.tool === "GENERAL_QA" && r.intent === "general_greet") return { reply: GREETING, action: null };
-  if (r.tool === "GENERAL_QA") return { reply: "General questions need a language model. This hosted copy runs entirely in your browser and has none. Run Jarvis locally and connect one, or ask for the weather, a reminder or a note.", action: null };
+  if (r.tool === "GENERAL_QA") return { reply: await byokAnswer(body, on), action: null };
   const hints = await (hintsP ||= fetch("hints.json").then((x) => x.json()).catch(() => ({})));
   const hint = hints[r.intent];
   return { reply: (hint ? `That sounds like a request to ${hint}, which I cannot do. ` : "I cannot do that. ") + "I can check the weather, set reminders and save notes.", action: null };
@@ -233,4 +234,76 @@ async function reminder(when, title) {
 export async function routeOnly(text) {
   const r = await router();
   return r.finish(r.route(text));
+}
+
+/* ---------- bring your own key (hosted site only) ----------
+   The visitor's key stays in this browser and is sent only to the provider they pick. The page's
+   Content-Security-Policy allows exactly these origins, all of which accept browser calls (checked
+   with a CORS preflight from this site's origin). */
+export const PROVIDERS = {
+  openrouter: { label: "OpenRouter", url: "https://openrouter.ai/api/v1/chat/completions" },
+  groq: { label: "Groq", url: "https://api.groq.com/openai/v1/chat/completions" },
+  openai: { label: "OpenAI", url: "https://api.openai.com/v1/chat/completions" },
+  gemini: { label: "Google Gemini", url: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions" },
+  mistral: { label: "Mistral", url: "https://api.mistral.ai/v1/chat/completions" },
+  cerebras: { label: "Cerebras", url: "https://api.cerebras.ai/v1/chat/completions" },
+};
+const DAILY_CAP = 100;
+export const byok = {
+  get() {
+    for (const store of [localStorage, sessionStorage]) {
+      try { const v = JSON.parse(store.getItem("jarvis.byok")); if (v?.provider in PROVIDERS && v.key && v.model) return v; } catch { /* storage blocked */ }
+    }
+    return null;
+  },
+  set(v, remember) {
+    this.clear();
+    try { (remember ? localStorage : sessionStorage).setItem("jarvis.byok", JSON.stringify(v)); } catch { /* storage blocked */ }
+  },
+  clear() { for (const store of [localStorage, sessionStorage]) { try { store.removeItem("jarvis.byok"); } catch { /* ignore */ } } },
+};
+function underCap() {
+  const day = new Date().toISOString().slice(0, 10);
+  try {
+    const c = JSON.parse(localStorage.getItem("jarvis.calls") || "{}");
+    const n = c.day === day ? c.n : 0;
+    if (n >= DAILY_CAP) return false;
+    localStorage.setItem("jarvis.calls", JSON.stringify({ day, n: n + 1 }));
+  } catch { /* storage blocked: the provider's own limits still apply */ }
+  return true;
+}
+async function byokAnswer(body, on) {
+  const cfg = byok.get();
+  if (!cfg) return "General questions need a language model. Add your own key under Preferences, or run Jarvis on your computer with OmniRoute. Weather, reminders and notes work without one.";
+  if (!underCap()) return `That is ${DAILY_CAP} answers today on this device, which is the safety limit. Try again tomorrow.`;
+  const messages = [
+    { role: "system", content: "You are Jarvis, a voice assistant. Answer in one or two short spoken sentences. No markdown, no lists, no emoji." },
+    ...(body.history || []).slice(-6).filter((h) => h.role === "user" || h.role === "assistant").map((h) => ({ role: h.role, content: String(h.content).slice(0, 500) })),
+    { role: "user", content: body.text },
+  ];
+  let res;
+  try {
+    res = await fetch(PROVIDERS[cfg.provider].url, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${cfg.key}` },
+      body: JSON.stringify({ model: cfg.model, messages, max_tokens: 200, temperature: 0.3, stream: true }) });
+  } catch { return `I could not reach ${PROVIDERS[cfg.provider].label}. Check your connection.`; }
+  if (res.status === 401 || res.status === 403) return `${PROVIDERS[cfg.provider].label} rejected the key. Check it under Preferences.`;
+  if (res.status === 404 || res.status === 400) return `${PROVIDERS[cfg.provider].label} did not accept the model "${cfg.model}". Check the model id under Preferences.`;
+  if (!res.ok || !res.body) return `${PROVIDERS[cfg.provider].label} did not answer (${res.status}). Try again in a moment.`;
+  const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+  let buf = "", out = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += value;
+    let i;
+    while ((i = buf.indexOf("\n")) >= 0) {
+      const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1);
+      if (!line.startsWith("data:") || line.endsWith("[DONE]")) continue;
+      try {
+        const piece = JSON.parse(line.slice(5)).choices?.[0]?.delta?.content;
+        if (piece) { out += piece; on.token?.(piece); }
+      } catch { /* a partial or non-JSON line */ }
+    }
+  }
+  return out.trim() || `${PROVIDERS[cfg.provider].label} sent an empty answer.`;
 }
