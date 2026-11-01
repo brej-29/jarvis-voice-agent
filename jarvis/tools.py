@@ -1,11 +1,12 @@
 """The things Jarvis can actually do. Each returns (spoken reply, optional client action)."""
 
-import os
 import re
 from datetime import datetime, timedelta, timezone
 
 import dateparser
 import httpx
+
+from jarvis.routers.joint import clean
 
 GEO = "https://geocoding-api.open-meteo.com/v1/search"
 FORECAST = "https://api.open-meteo.com/v1/forecast"
@@ -121,7 +122,7 @@ _LEAD = re.compile(r"^(?:(?:hey |ok |okay )?jarvis,? )?(?:please )?(?:remind me|
 
 def reminder_title(text: str, when: str) -> str:
     """Fallback title when the router found no event span: the request minus the trigger and the time."""
-    t = _LEAD.sub("", text.lower().strip())
+    t = _LEAD.sub("", " ".join(clean(text)))  # same normalisation as the router, so "5 pm" and "five pm" line up
     for w in when.split():
         t = re.sub(rf"\b{re.escape(w)}\b", " ", t, count=1)
     words = t.replace(",", " ").split()
@@ -143,24 +144,4 @@ def unsupported(intent: str) -> str:
 GREETING = "Hello. I can check the weather, set reminders and save notes. What do you need?"
 
 
-async def answer(text: str, history: list[dict] | None = None) -> str:
-    """General Q&A through any OpenAI-compatible endpoint (OmniRoute, Ollama /v1, llama.cpp server)."""
-    base, model = os.getenv("JARVIS_LLM_BASE_URL"), os.getenv("JARVIS_LLM_MODEL")
-    if not base or not model:
-        return ("General questions need a language model and none is connected. "
-                "Set JARVIS_LLM_BASE_URL and JARVIS_LLM_MODEL. Weather, reminders and notes work without one.")
-    headers = {"Authorization": f"Bearer {os.getenv('JARVIS_LLM_API_KEY', '')}"}
-    msgs = [{"role": "system", "content": "You are Jarvis, a voice assistant. Answer in one or two short "
-                                           "spoken sentences. No markdown."}]
-    # the browser supplies the history, so keep only plain user/assistant turns of bounded size
-    past = [{"role": h["role"], "content": str(h.get("content", ""))[:500]} for h in (history or [])[-6:]
-            if isinstance(h, dict) and h.get("role") in ("user", "assistant")]
-    msgs += past + [{"role": "user", "content": text}]
-    try:
-        async with httpx.AsyncClient(timeout=30) as c:
-            r = await c.post(base.rstrip("/") + "/chat/completions", headers=headers,
-                             json={"model": model, "messages": msgs, "max_tokens": 120, "temperature": 0.3})
-        r.raise_for_status()
-        return r.json()["choices"][0]["message"]["content"].strip()
-    except (httpx.HTTPError, KeyError, IndexError, ValueError):
-        return "My language model did not answer. Try again in a moment."
+from jarvis.llm import answer, stream_answer  # noqa: F401  (general questions live in jarvis/llm.py)

@@ -11,19 +11,38 @@ const MODEL = "model/";
 export async function health() {
   if (!STATIC) return (await fetch("api/health")).json();
   const r = await router();
-  return { status: "ok", threshold: r.meta.threshold };
+  return { status: "ok", threshold: r.meta.threshold, llm: { connected: false } };
 }
 
-export async function chat(body) {
+/* Streaming chat. `on.route(route)` fires as soon as the router has decided, `on.token(text)` for each
+   piece of a streamed answer, and the promise resolves with { reply, action, route }. */
+export async function chat(body, on = {}) {
   if (!STATIC) {
-    const res = await fetch("api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-    if (!res.ok) throw new Error(res.status);
-    return res.json();
+    const res = await fetch("api/chat/stream", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    if (!res.ok || !res.body) throw new Error(res.status);
+    const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+    let buf = "", route = null, done = null;
+    for (;;) {
+      const { value, done: end } = await reader.read();
+      if (end) break;
+      buf += value;
+      let i;
+      while ((i = buf.indexOf("\n\n")) >= 0) {
+        const block = buf.slice(0, i); buf = buf.slice(i + 2);
+        const ev = /^event: (\w+)/m.exec(block)?.[1], data = JSON.parse(/^data: (.*)$/m.exec(block)?.[1] ?? "null");
+        if (ev === "route") { route = data; on.route?.(route); }
+        else if (ev === "token") on.token?.(data);
+        else if (ev === "done") done = data;
+      }
+    }
+    if (!route || !done) throw new Error("stream ended early");
+    return { reply: done.reply, action: done.action, route };
   }
   const r = await router();
   const t0 = performance.now();
   const route = await r.finish(r.route(body.text));
   route.ms = performance.now() - t0;
+  on.route?.(route);
   const { reply, action } = await act(route, body);
   return { reply, action, route };
 }
@@ -159,7 +178,7 @@ export function normalizeWhen(text) {
 const HAS_TIME = /\d|noon|midnight|\bam\b|\bpm\b|\bin \w+ (?:minutes?|hours?)\b/;
 const LEAD = /^(?:(?:hey |ok |okay )?jarvis,? )?(?:please )?(?:remind me|set (?:a |an )?reminder|reminder)(?: to| about| that| for)? ?/;
 export function reminderTitle(text, when) {
-  let t = text.toLowerCase().trim().replace(LEAD, "");
+  let t = clean(text).join(" ").replace(LEAD, "");
   for (const w of when.split(/\s+/).filter(Boolean)) t = t.replace(new RegExp(`\\b${w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`), " ");
   const words = t.replaceAll(",", " ").split(/\s+/).filter(Boolean);
   while (words.length && ["at", "on", "for", "by", "in", "from", "till", "until", "to", "and"].includes(words[words.length - 1])) words.pop();

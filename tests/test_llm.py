@@ -1,0 +1,76 @@
+import asyncio
+import json
+
+import httpx
+
+from jarvis import llm
+
+
+def sse(*pieces, usage=None):
+    lines = [f"data: {json.dumps({'choices': [{'delta': {'content': p}}]})}" for p in pieces]
+    if usage:
+        lines.append(f"data: {json.dumps({'choices': [], 'usage': usage})}")
+    return ("\n\n".join(lines) + "\n\ndata: [DONE]\n\n").encode()
+
+
+def run(coro):
+    return asyncio.run(coro)
+
+
+def collect(client):
+    async def go():
+        return [p async for p in llm.stream_answer("who painted the mona lisa", None, client)]
+
+    return run(go())
+
+
+def setup(monkeypatch, tmp_path, **env):
+    monkeypatch.setattr(llm, "SPEND_FILE", tmp_path / "spend.json")
+    for k in ("LLM_ENDPOINT", "LLM_API_KEY", "LLM_MODEL", "MONTHLY_BUDGET_USD", "LLM_PRICE_IN_PER_M",
+              "LLM_PRICE_OUT_PER_M", "JARVIS_LLM_BASE_URL", "JARVIS_LLM_MODEL", "JARVIS_LLM_API_KEY"):
+        monkeypatch.delenv(k, raising=False)
+    for k, v in env.items():
+        monkeypatch.setenv(k, v)
+
+
+def test_placeholder_model_and_base_url_are_normalised(monkeypatch, tmp_path):
+    setup(monkeypatch, tmp_path, LLM_ENDPOINT="http://x/v1", LLM_MODEL="<cheap model>", LLM_PRICE_IN_PER_M="<USD>")
+    s = llm.settings()
+    assert s["endpoint"] == "http://x/v1/chat/completions"
+    assert s["model"] == llm.DEFAULT_MODEL and s["price_in"] == 0.0
+
+
+def test_streams_pieces_and_records_spend(monkeypatch, tmp_path):
+    setup(monkeypatch, tmp_path, LLM_ENDPOINT="http://x/v1/chat/completions", LLM_PRICE_IN_PER_M="10",
+          LLM_PRICE_OUT_PER_M="20")
+    seen = {}
+
+    def handler(request):
+        seen["auth"] = request.headers.get("authorization")
+        seen["body"] = json.loads(request.content)
+        return httpx.Response(200, content=sse("Leonardo", " da Vinci.", usage={"prompt_tokens": 100, "completion_tokens": 10}))
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    assert "".join(collect(client)) == "Leonardo da Vinci."
+    assert seen["body"]["stream"] is True and seen["auth"] is None  # no key configured, no header
+    st = llm.status()
+    assert st["calls_today"] == 1 and st["spent_usd"] == 0.0012
+
+
+def test_budget_blocks_the_call(monkeypatch, tmp_path):
+    setup(monkeypatch, tmp_path, LLM_ENDPOINT="http://x/v1", MONTHLY_BUDGET_USD="0.5")
+    (tmp_path / "spend.json").write_text(json.dumps({"month": __import__("datetime").date.today().strftime("%Y-%m"), "usd": 0.6}))
+
+    def handler(request):
+        raise AssertionError("must not call the model")
+
+    out = collect(httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    assert "budget" in "".join(out)
+
+
+def test_not_connected_and_http_error(monkeypatch, tmp_path):
+    setup(monkeypatch, tmp_path)
+    assert "none is connected" in "".join(collect(None))
+    setup(monkeypatch, tmp_path, LLM_ENDPOINT="http://x/v1")
+    client = httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(500)))
+    assert "".join(collect(client)) == llm.FAILED

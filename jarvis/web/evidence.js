@@ -28,9 +28,9 @@ function barChart(rows, { min = 0, max = 1, aria }) {
     const y = i * rowH + 6;
     s += `<g><title>${r.label}: ${f3(r.v)} (95% CI ${f3(r.lo)} to ${f3(r.hi)})</title>
       <text x="${L - 12}" y="${y + 15}" text-anchor="end">${r.label}</text>
-      <rect x="${L}" y="${y + 2}" width="${Math.max(2, x(r.v) - L)}" height="16" rx="4" fill="${COLOR[r.group]}"/>
-      <line x1="${x(r.lo)}" x2="${x(r.hi)}" y1="${y + 10}" y2="${y + 10}" stroke="var(--ink)" stroke-width="2"/>
-      <text x="${x(r.hi) + 8}" y="${y + 15}">${r.v.toFixed(2)}</text></g>`;
+      <rect class="bar" style="--i:${i}" x="${L}" y="${y + 2}" width="${Math.max(2, x(r.v) - L)}" height="16" rx="4" fill="${COLOR[r.group]}"/>
+      <g class="pt" style="--i:${i}"><line x1="${x(r.lo)}" x2="${x(r.hi)}" y1="${y + 10}" y2="${y + 10}" stroke="var(--ink)" stroke-width="2"/>
+      <text x="${x(r.hi) + 8}" y="${y + 15}">${r.v.toFixed(2)}</text></g></g>`;
   });
   return s + "</svg>";
 }
@@ -44,9 +44,9 @@ function latencyChart(rows) {
   rows.forEach((r, i) => {
     const y = i * rowH + 16;
     s += `<g><title>${r.label}: median ${msFull(r.p50)}, 95th percentile ${msFull(r.p95)}</title><text x="${L - 12}" y="${y + 4}" text-anchor="end">${r.label}</text>
-      <line x1="${x(Math.max(r.p50, lo))}" x2="${x(r.p95)}" y1="${y}" y2="${y}" stroke="${COLOR[r.group]}" stroke-width="3" stroke-linecap="round"/>
+      <g class="pt" style="--i:${i}"><line x1="${x(Math.max(r.p50, lo))}" x2="${x(r.p95)}" y1="${y}" y2="${y}" stroke="${COLOR[r.group]}" stroke-width="3" stroke-linecap="round"/>
       <circle cx="${x(Math.max(r.p50, lo))}" cy="${y}" r="6" fill="${COLOR[r.group]}" stroke="var(--ground)" stroke-width="2"/>
-      <text x="${x(r.p95) + 10}" y="${y + 4}">${msFull(r.p50)}</text></g>`;
+      <text x="${x(r.p95) + 10}" y="${y + 4}">${msFull(r.p50)}</text></g></g>`;
   });
   return s + "</svg>";
 }
@@ -60,10 +60,10 @@ function dumbbell(rows) {
   rows.forEach((r, i) => {
     const y = i * rowH + 18;
     s += `<g><title>${r.id}: ${f3(r.clean)} on gold text, ${f3(r.asr)} on speech</title><text x="${L - 12}" y="${y + 4}" text-anchor="end">${r.id}</text>
-      <line x1="${x(r.asr)}" x2="${x(r.clean)}" y1="${y}" y2="${y}" stroke="var(--line)" stroke-width="3"/>
+      <g class="pt" style="--i:${i}"><line x1="${x(r.asr)}" x2="${x(r.clean)}" y1="${y}" y2="${y}" stroke="var(--line)" stroke-width="3"/>
       <circle cx="${x(r.clean)}" cy="${y}" r="6" fill="var(--ink)"/>
       <circle cx="${x(r.asr)}" cy="${y}" r="6" fill="var(--c-base)" stroke="var(--ground)" stroke-width="2"/>
-      <text x="${x(r.asr) - 12}" y="${y + 4}" text-anchor="end">${r.asr.toFixed(2)}</text><text x="${x(r.clean) + 12}" y="${y + 4}">${r.clean.toFixed(2)}</text></g>`;
+      <text x="${x(r.asr) - 12}" y="${y + 4}" text-anchor="end">${r.asr.toFixed(2)}</text><text x="${x(r.clean) + 12}" y="${y + 4}">${r.clean.toFixed(2)}</text></g></g>`;
   });
   return s + "</svg>";
 }
@@ -79,7 +79,7 @@ function dialChart(sweep) {
   for (let t = 0; t <= ymax; t += 0.1) s += `<line class="axis" x1="${L}" x2="${W - R}" y1="${y(t)}" y2="${y(t)}"/><text class="dim" x="${L - 8}" y="${y(t) + 4}" text-anchor="end">${(t * 100).toFixed(0)}%</text>`;
   s += `<text class="dim" x="${(L + W - R) / 2}" y="${H - 4}" text-anchor="middle">False actions: requests it should decline but acted on</text>`;
   for (const [key, label, col, dash] of [["clean", "Gold text", "var(--c-fast)", ""], ["asr", "Recognised speech", "var(--c-base)", "6 4"]]) {
-    s += `<polyline fill="none" stroke="${col}" stroke-width="2.5" ${dash ? `stroke-dasharray="${dash}"` : ""} points="${sweep.map((p) => `${x(p[key].far)},${y(p[key].miss)}`).join(" ")}"/>`;
+    s += `<polyline class="ln" pathLength="1" fill="none" stroke="${col}" stroke-width="2.5" points="${sweep.map((p) => `${x(p[key].far)},${y(p[key].miss)}`).join(" ")}"/>`;
     sweep.forEach((p) => { s += `<circle cx="${x(p[key].far)}" cy="${y(p[key].miss)}" r="5.5" fill="${col}" stroke="var(--ground)" stroke-width="2"><title>${label}, threshold ${p.th}: ${pct(p[key].far)} false actions, ${pct(p[key].miss)} missed</title></circle>`; });
     const last = sweep[sweep.length - 1], first = sweep[0];
     s += `<text x="${x(last[key].far) + 10}" y="${y(last[key].miss) + 4}">${label}</text>`;
@@ -203,6 +203,10 @@ export async function renderEvidence(root) {
       <li>Latency is from one laptop (i5-13450HX), router only. Browser speech recognition and network calls are not included.</li>
     </ul>
   </section>`;
+  const seen = new IntersectionObserver((entries) => {
+    for (const e of entries) if (e.isIntersecting) { e.target.classList.add("in"); seen.unobserve(e.target); }
+  }, { threshold: 0.25 });
+  root.querySelectorAll("svg.chart").forEach((c) => seen.observe(c));
   // SVG presentation attributes cannot hold var(...), so move them to inline style
   for (const n of root.querySelectorAll("svg *")) {
     for (const a of ["fill", "stroke"]) {

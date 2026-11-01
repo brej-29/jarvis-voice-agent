@@ -1,5 +1,6 @@
 """FastAPI app: the router, the tools and the static UI in one process."""
 
+import json
 import os
 import time
 from contextlib import asynccontextmanager
@@ -7,13 +8,14 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from jarvis import tools
+from jarvis import llm, tools
 from jarvis.routers.joint import JointRouter
 
+llm.load_dotenv()
 WEB = Path(__file__).resolve().parent / "web"
 state: dict = {}
 
@@ -60,7 +62,7 @@ def run_router(text: str):
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "router": "joint-int8", "threshold": state["router"].threshold}
+    return {"status": "ok", "router": "joint-int8", "threshold": state["router"].threshold, "llm": llm.status()}
 
 
 @app.post("/api/route")
@@ -69,26 +71,53 @@ def route(body: ChatIn):
     return route_json(run_router(body.text))
 
 
-@app.post("/api/chat")
-async def chat(body: ChatIn):
-    r = run_router(body.text)
-    action = None
+async def act(r, body: ChatIn):
+    """Run the tool the router chose. Returns (spoken reply, client action)."""
     if r.tool == "WEATHER":
-        reply, action = await tools.weather(r.args.get("city") or body.default_city)
-    elif r.tool == "SET_REMINDER":
+        return await tools.weather(r.args.get("city") or body.default_city)
+    if r.tool == "SET_REMINDER":
         when = r.args.get("when", "")
         title = r.args.get("title", "")
         derived = tools.reminder_title(body.text, when)
         if derived and (not title or title in derived):  # the tagger often stops a word early ("call" for "call mum")
             title = derived
-        reply, action = tools.reminder(when, title, body.tz_offset_min)
-    elif r.tool == "SAVE_NOTE":
-        reply, action = tools.note(body.text)
-    elif r.tool == "GENERAL_QA":
-        reply = tools.GREETING if r.intent == "general_greet" else await tools.answer(body.text, body.history)
-    else:
-        reply = tools.unsupported(r.intent)
+        return tools.reminder(when, title, body.tz_offset_min)
+    if r.tool == "SAVE_NOTE":
+        return tools.note(body.text)
+    if r.tool == "GENERAL_QA":
+        return (tools.GREETING if r.intent == "general_greet" else await llm.answer(body.text, body.history)), None
+    return tools.unsupported(r.intent), None
+
+
+@app.post("/api/chat")
+async def chat(body: ChatIn):
+    r = run_router(body.text)
+    reply, action = await act(r, body)
     return {"reply": reply, "action": action, "route": route_json(r)}
+
+
+def sse(event: str, data) -> str:
+    return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+
+
+@app.post("/api/chat/stream")
+async def chat_stream(body: ChatIn):
+    """Server-sent events: `route` first (so the UI can show the decision), then `token`s, then `done`."""
+    r = run_router(body.text)
+
+    async def events():
+        yield sse("route", route_json(r))
+        if r.tool == "GENERAL_QA" and r.intent != "general_greet":
+            parts = []
+            async for piece in llm.stream_answer(body.text, body.history):
+                parts.append(piece)
+                yield sse("token", piece)
+            yield sse("done", {"reply": "".join(parts).strip(), "action": None})
+            return
+        reply, action = await act(r, body)
+        yield sse("done", {"reply": reply, "action": action})
+
+    return StreamingResponse(events(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/")

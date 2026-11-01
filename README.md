@@ -7,7 +7,9 @@ A local voice assistant router. It reads what you said, picks one of five outcom
 **Live demo:** https://brej-29.github.io/jarvis-voice-agent/ (free, no server: the router runs in your browser, see [limits](#free-hosting-and-limits)).
 **Windows app:** `make exe` builds a single `jarvis.exe` that runs the same app offline on your machine, no Python needed (see [Run it](#run-it)). I have not published a prebuilt copy.
 
-![Decision slips: what was heard, which tool, how sure, what happened](docs/images/talk.png)
+![Decision slips: each request lights a trace from Heard to Replied, and a declined request stops at the router](docs/images/talk.png)
+
+The orb is the microphone and a readout: still when idle, rippling with your voice while listening, swirling while a real request is in flight, and it turns grey when Jarvis declines. Answers from the language model stream in. On phones the layout stacks ([screenshot](docs/images/mobile.png)). Motion honours `prefers-reduced-motion`.
 
 ## The problem
 
@@ -135,13 +137,18 @@ uv pip install --python .venv/Scripts/python.exe -e .
 
 Voice input uses your browser's speech recognition (Chrome or Edge); typing works everywhere. Reminders become browser notifications and notes are kept on the device.
 
-General questions ("who painted the Mona Lisa") need a language model, and the router never needs one. Point Jarvis at any OpenAI-compatible endpoint (a local gateway such as OmniRoute, Ollama's `/v1`, llama.cpp server):
+General questions ("who painted the Mona Lisa") need a language model, and the router never needs one. Jarvis reads a `.env` file (git-ignored) or the environment and talks to any OpenAI-compatible endpoint: OmniRoute, Ollama's `/v1`, a llama.cpp server. Copy `.env.example` to `.env`:
 
 ```bash
-set JARVIS_LLM_BASE_URL=http://localhost:11434/v1
-set JARVIS_LLM_MODEL=qwen2.5:1.5b
-set JARVIS_LLM_API_KEY=...        # only if the endpoint needs one
+LLM_ENDPOINT=http://localhost:20128/v1/chat/completions
+LLM_API_KEY=...
+LLM_MODEL=auto/best-free      # default if unset; a free OmniRoute combo
+MONTHLY_BUDGET_USD=1.50       # Jarvis stops calling the model once the tracked spend reaches this
+LLM_PRICE_IN_PER_M=0          # USD per million tokens, so the budget guard can count; 0 for free models
+LLM_PRICE_OUT_PER_M=0
 ```
+
+Answers stream into the decision slip as they arrive (first token in about 1.2 s with `auto/best-free` on my setup). The key never leaves the server, calls are capped at 300 a day, and the spend ledger lives in `.jarvis_spend.json`. With no endpoint set, general questions say so and everything else works.
 
 **Windows exe:** `make exe` builds `dist/jarvis.exe` with PyInstaller (UI and model inside, 63 MB, no Python needed). It opens your browser on `http://127.0.0.1:8765`. A build made from this commit was smoke-tested over HTTP (health, reminder, greeting). The file is unsigned, so Windows SmartScreen may warn.
 
