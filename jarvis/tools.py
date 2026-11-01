@@ -64,16 +64,44 @@ async def weather(city: str, client: httpx.AsyncClient | None = None) -> tuple[s
             f"{round(day['temperature_2m_max'][0])}."), {"type": "weather", "place": place}
 
 
+_WORD_NUM = {w: str(i) for i, w in enumerate(
+    "zero one two three four five six seven eight nine ten eleven twelve".split())}
+_DAYPART = {"morning": "9 am", "afternoon": "3 pm", "evening": "6 pm", "night": "8 pm"}
+_HAS_TIME = re.compile(r"\d|noon|midnight|\bam\b|\bpm\b|\bin \w+ (?:minutes?|hours?)\b")
+_MINUTES = {"fifteen": "15", "thirty": "30", "forty five": "45"}
+
+
+def normalize_when(text: str) -> str:
+    """Spoken time phrases to something dateparser understands ("tonight", "five thirty p m")."""
+    t = text.lower().replace(".", " ")
+    t = re.sub(r"\b([ap]) m\b", r"\1m", t)
+    t = re.sub(r"\bnext (\w+day)\b", r"\1", t)
+    t = re.sub(r"\bhalf past (\w+)\b", lambda m: f"{_WORD_NUM.get(m.group(1), m.group(1))}:30", t)
+    t = re.sub(r"\btonight\b", "today night", t)
+    t = re.sub(r"\bthis (morning|afternoon|evening)\b", r"today \1", t)
+    if not re.search(r"\d|\b[ap]m\b", t):
+        for part, clock in _DAYPART.items():
+            t = re.sub(rf"\b{part}\b", clock, t)
+    t = " ".join(_WORD_NUM.get(w, w) for w in t.split())
+    t = re.sub(r"\b(\d{1,2}) (\d{2}) ([ap]m)\b", r"\1:\2 \3", t)
+    t = re.sub(r"\b(\d{1,2}) (fifteen|thirty|forty five) ([ap]m)\b",
+               lambda m: f"{m.group(1)}:{_MINUTES[m.group(2)]} {m.group(3)}", t)
+    return t.strip()
+
+
 def reminder(when: str, title: str, tz_offset_min: int = 0, now: datetime | None = None):
     """tz_offset_min is minutes east of UTC (the browser reports the negative of getTimezoneOffset)."""
     tz = timezone(timedelta(minutes=tz_offset_min))
     now = now or datetime.now(tz)
     if not when:
         return "When should I remind you?", None
-    at = dateparser.parse(when, settings={"RELATIVE_BASE": now.replace(tzinfo=None),
+    norm = normalize_when(when)
+    at = dateparser.parse(norm, settings={"RELATIVE_BASE": now.replace(tzinfo=None),
                                           "PREFER_DATES_FROM": "future"})
     if at is None:
         return f"I did not understand the time '{when}'. Try something like tomorrow at 3 pm.", None
+    if not _HAS_TIME.search(norm):
+        at = at.replace(hour=9, minute=0)  # a date with no time of day: remind at 9 am
     at = at.replace(tzinfo=tz)
     label = title or "Reminder"
     spoken = at.strftime("%A %d %B at %I:%M %p").replace(" 0", " ")

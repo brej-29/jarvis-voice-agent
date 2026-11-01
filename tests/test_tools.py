@@ -40,3 +40,12 @@ def test_clean_spells_out_recogniser_digits():
 def test_reminder_title_fallback():
     assert tools.reminder_title("remind me to call mum tomorrow at 5 pm", "tomorrow 5 pm") == "call mum"
     assert tools.reminder_title("remind me to take the bins out tonight", "tonight") == "take the bins out"
+
+
+def test_spoken_times_parse():
+    now = datetime(2026, 1, 5, 9, 0)
+    cases = {"tonight": "20:00", "tomorrow morning": "09:00", "five thirty p m": "17:30",
+             "next monday": "09:00", "this evening": "18:00", "half past two pm": "14:30", "friday": "09:00"}
+    for when, hhmm in cases.items():
+        _reply, action = tools.reminder(when, "x", tz_offset_min=0, now=now)
+        assert action and action["at"][11:16] == hhmm, (when, action)
