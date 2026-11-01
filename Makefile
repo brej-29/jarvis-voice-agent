@@ -1,38 +1,38 @@
-.PHONY: backend-venv backend-install backend-dev backend-test \
-        mobile-get mobile-run-android format lint
+# Windows: run these from Git Bash, or copy the commands. Python via uv.
+PY = .venv/Scripts/python.exe
+LLM15 = data/raw/models/qwen2.5-1.5b-instruct-q4_k_m.gguf
+LLM05 = data/raw/models/qwen2.5-0.5b-instruct-q4_k_m.gguf
 
-BACKEND_DIR := backend
-MOBILE_DIR := mobile
+.PHONY: setup test run exe eval train repro
 
-# Create a Python virtual environment for the backend.
-backend-venv:
-	cd $(BACKEND_DIR) && (python3 -m venv .venv || python -m venv .venv)
+setup:
+	uv venv --python 3.11 .venv
+	uv pip install --python $(PY) torch --index-url https://download.pytorch.org/whl/cu124
+	uv pip install --python $(PY) -e ".[train,eval,dev]"
+	# one package from one extra index, no dependency resolution against it (avoids dependency confusion)
+	uv pip install --python $(PY) llama-cpp-python --no-deps --only-binary :all: --index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
 
-# Install backend dependencies into the virtual environment.
-backend-install: backend-venv
-	cd $(BACKEND_DIR) && . .venv/bin/activate && pip install --upgrade pip && pip install -r requirements.txt
+test:
+	$(PY) -m ruff check . && $(PY) -m pytest -q
 
-# Run the backend in development mode with auto-reload on port 8000.
-backend-dev: backend-venv
-	cd $(BACKEND_DIR) && . .venv/bin/activate && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+run:
+	$(PY) -m jarvis
 
-# Run backend tests.
-backend-test: backend-venv
-	cd $(BACKEND_DIR) && . .venv/bin/activate && pytest
+exe:
+	$(PY) -m PyInstaller packaging/jarvis.spec --noconfirm
 
-# Fetch Flutter dependencies for the mobile app.
-mobile-get:
-	cd $(MOBILE_DIR) && flutter pub get
+train:
+	for s in 0 1 2; do PYTHONPATH=. $(PY) training/train_joint.py --seed $$s --out models/aug_seed$$s; done
 
-# Run the Flutter app on an Android emulator (or default device if not specified).
-mobile-run-android: mobile-get
-	cd $(MOBILE_DIR) && flutter run
+# Fast systems on the full test set (about a minute)
+eval:
+	$(PY) -m jarvis.bench.run r0 --set full
+	$(PY) -m jarvis.bench.run m1 --set full
+	for s in 0 1 2; do $(PY) -m jarvis.bench.run j1 --model models/aug_seed$$s --set full; done
 
-# Format backend Python code using ruff.
-format: backend-venv
-	cd $(BACKEND_DIR) && . .venv/bin/activate && ruff format .
+# LLM systems on the stratified subset (about an hour on CPU; models are GGUF downloads)
+eval-llm:
+	for m in $(LLM15) $(LLM05); do for s in l1 l0; do $(PY) -m jarvis.bench.run $$s --model $$m --set subset; done; done
 
-# Lint backend Python code and run Flutter analyze.
-lint: backend-venv
-	cd $(BACKEND_DIR) && . .venv/bin/activate && ruff check .
-	cd $(MOBILE_DIR) && flutter analyze
+repro:
+	$(PY) bench/repro_v1_bugs.py

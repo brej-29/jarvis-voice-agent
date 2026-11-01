@@ -1,0 +1,46 @@
+# Components Overview
+
+This document describes the main components of the Jarvis Voice Agent codebase and how they fit together.
+
+---
+
+## Repository Layout
+
+At a high level:
+
+```text
+/
+  README.md
+  .gitignore
+  context/
+    GOAL.md
+    ARCHITECTURE.md
+    COMPONENTS.md
+    API_CONTRACT.md
+    COSINE_GROUNDING.md
+    DECISIONS.md
+    CHANGELOG.md
+  backend/
+    app/
+      core/
+      schemas/
+      services/
+      routers/
+    tests/
+    requirements.txt (or pyproject.toml, depending on choice)
+    .env.example
+  mobile/
+    pubspec.yaml
+    lib/
+      core/
+      features/
+        assistant/
+        settings/
+    android/...
+    ios/...
+```
+
+This structure is designed to:
+
+- Keep **context** close to the code, for humans and AI tools.
+- Separate **backend** (API + LLM integration) from **

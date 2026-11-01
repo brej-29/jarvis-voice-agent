@@ -1,0 +1,6 @@
+{
+  "tag": "backup/pre-rebuild-2026-11-01",
+  "save_note": "NameError: name 'datetime' is not defined",
+  "repair_prompt_contains_model_output": false,
+  "repair_prompt_excerpt": "You previously returned invalid JSON for a tool routing decision. Here is your response:\n\nExpecting value: line 1 column 1 (char 0)\n\nPlease return ONLY valid JSON that matches this schema:\n{\"tool_call\":{\"name\":\"WEATHER\"|\"SET_REMIN"
+}
