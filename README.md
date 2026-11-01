@@ -5,7 +5,7 @@
 A local voice assistant router. It reads what you said, picks one of five outcomes (weather, reminder, note, answer, or "I cannot do that") in about 2 ms on one CPU thread, and says plainly when it has no tool for a request.
 
 **Live demo:** https://brej-29.github.io/jarvis-voice-agent/ (free, no server: the router runs in your browser, see [limits](#free-hosting-and-limits)).
-**Windows app:** `jarvis.exe` from the [latest release](https://github.com/brej-29/jarvis-voice-agent/releases/latest) runs the same app offline on your machine, no Python needed (see [Run it](#run-it)).
+**Windows app:** `make exe` builds a single `jarvis.exe` that runs the same app offline on your machine, no Python needed (see [Run it](#run-it)). I have not published a prebuilt copy.
 
 ![Decision slips: what was heard, which tool, how sure, what happened](docs/images/talk.png)
 
@@ -143,7 +143,7 @@ set JARVIS_LLM_MODEL=qwen2.5:1.5b
 set JARVIS_LLM_API_KEY=...        # only if the endpoint needs one
 ```
 
-**Windows exe:** download `jarvis.exe` from the latest release, or `make exe` to build `dist/jarvis.exe` with PyInstaller (UI and model inside, no Python needed). It opens your browser on `http://127.0.0.1:8765`. Windows SmartScreen may warn because the file is unsigned.
+**Windows exe:** `make exe` builds `dist/jarvis.exe` with PyInstaller (UI and model inside, 63 MB, no Python needed). It opens your browser on `http://127.0.0.1:8765`. A build made from this commit was smoke-tested over HTTP (health, reminder, greeting). The file is unsigned, so Windows SmartScreen may warn.
 
 ## Reproduce
 
