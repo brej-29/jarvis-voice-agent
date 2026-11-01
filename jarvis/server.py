@@ -1,10 +1,12 @@
 """FastAPI app: the router, the tools and the static UI in one process."""
 
+import os
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -23,6 +25,11 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="Jarvis", version="2.0.0", lifespan=lifespan)
+# Reject foreign Host headers so a web page cannot reach the local API through DNS rebinding.
+# A hosted deployment lists its public hostname in JARVIS_ALLOWED_HOSTS (comma separated).
+_hosts = ["localhost", "127.0.0.1", "[::1]", "testserver"]
+_hosts += [h.strip() for h in os.getenv("JARVIS_ALLOWED_HOSTS", "").split(",") if h.strip()]
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=_hosts)
 
 
 class ChatIn(BaseModel):

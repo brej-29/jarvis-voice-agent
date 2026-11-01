@@ -19,6 +19,7 @@ from transformers import AutoModel, AutoTokenizer
 
 from jarvis.bench import data
 from jarvis.routers.joint import SLOT_TAGS, clean
+from training import synth
 
 BACKBONE = "nreimers/MiniLM-L6-H384-uncased"
 SLOT_KIND = {"place_name": "CITY", "event_name": "TITLE",
@@ -99,13 +100,18 @@ def main():
     ap.add_argument("--lr", type=float, default=1e-4)
     ap.add_argument("--bs", type=int, default=64)
     ap.add_argument("--out", default="models/joint")
+    ap.add_argument("--no-augment", action="store_true", help="MASSIVE only (the pre-registered J1 setup)")
     a = ap.parse_args()
     random.seed(a.seed); np.random.seed(a.seed); torch.manual_seed(a.seed)
     dev = "cuda" if torch.cuda.is_available() else "cpu"
 
     train, devset = load_split("train"), load_split("dev")
+    if not a.no_augment:
+        n_tr, n_dev = synth.notes(a.seed)
+        train = synth.wake_word(train, random.Random(a.seed)) + n_tr + synth.greetings()
+        devset = devset + n_dev
     intents = sorted({r[2] for r in train})
-    tool_of = {i: data.TOOL_OF_INTENT.get(i, "UNSUPPORTED") for i in intents}
+    tool_of = {i: ("SAVE_NOTE" if i == "note_save" else data.TOOL_OF_INTENT.get(i, "UNSUPPORTED")) for i in intents}
     tok = AutoTokenizer.from_pretrained(BACKBONE)
     model = Net(len(intents)).to(dev)
     opt = torch.optim.AdamW(model.parameters(), lr=a.lr, weight_decay=0.01)
