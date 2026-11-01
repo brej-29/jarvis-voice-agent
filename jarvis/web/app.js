@@ -307,13 +307,13 @@ if (STATIC) {
   $("#byok").hidden = false;
   for (const [id, p] of Object.entries(PROVIDERS)) $("#byok-provider").append(new Option(p.label, id));
   const cur = byok.get();
-  if (cur) { $("#byok-provider").value = cur.provider; $("#byok-model").value = cur.model; $("#byok-msg").textContent = "A key is saved in this browser."; }
+  if (cur) { $("#byok-provider").value = cur.provider; $("#byok-model").value = cur.model; $("#byok-msg").textContent = "A key is set for this tab."; }
   $("#byok-save").addEventListener("click", () => {
     const provider = $("#byok-provider").value, model = $("#byok-model").value.trim(), key = $("#byok-key").value.trim();
     if (!model || !key) { $("#byok-msg").textContent = "Enter a model id and a key."; return; }
-    byok.set({ provider, model, key }, $("#byok-remember").checked);
+    byok.set({ provider, model, key });
     $("#byok-key").value = "";
-    $("#byok-msg").textContent = $("#byok-remember").checked ? "Saved on this device." : "Saved for this tab only.";
+    $("#byok-msg").textContent = "Saved for this tab only.";
     health();
   });
   $("#byok-forget").addEventListener("click", () => { byok.clear(); $("#byok-model").value = ""; $("#byok-msg").textContent = "Key removed."; health(); });

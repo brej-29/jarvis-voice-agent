@@ -250,17 +250,19 @@ export const PROVIDERS = {
 };
 const DAILY_CAP = 100;
 export const byok = {
+  // Kept for this tab only (sessionStorage). The site shares its origin (brej-29.github.io) with other pages,
+  // so nothing about the key is written to storage that outlives the tab.
   get() {
-    for (const store of [localStorage, sessionStorage]) {
-      try { const v = JSON.parse(store.getItem("jarvis.byok")); if (v?.provider in PROVIDERS && v.key && v.model) return v; } catch { /* storage blocked */ }
-    }
+    try { const v = JSON.parse(sessionStorage.getItem("jarvis.byok")); if (v?.provider in PROVIDERS && v.key && v.model) return v; } catch { /* storage blocked */ }
     return null;
   },
-  set(v, remember) {
+  set(v) {
     this.clear();
-    try { (remember ? localStorage : sessionStorage).setItem("jarvis.byok", JSON.stringify(v)); } catch { /* storage blocked */ }
+    try { sessionStorage.setItem("jarvis.byok", JSON.stringify(v)); } catch { /* storage blocked */ }
   },
-  clear() { for (const store of [localStorage, sessionStorage]) { try { store.removeItem("jarvis.byok"); } catch { /* ignore */ } } },
+  clear() {
+    for (const store of [sessionStorage, localStorage]) { try { store.removeItem("jarvis.byok"); } catch { /* ignore */ } } // also removes a key saved by an older version
+  },
 };
 function underCap() {
   const day = new Date().toISOString().slice(0, 10);
