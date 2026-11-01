@@ -1,4 +1,4 @@
-import { chat, health as engineHealth, STATIC } from "./engine.js";
+import { chat, health as engineHealth, STATIC, byok, PROVIDERS } from "./engine.js";
 import { renderEvidence } from "./evidence.js";
 import { createOrb } from "./orb.js";
 
@@ -48,8 +48,12 @@ async function health() {
     threshold = h.threshold;
     llm = h.llm || llm;
     const where = STATIC ? "Router ready, running in your browser" : "Router ready, running on this machine";
-    s.textContent = `${where}. ${llm.connected ? "Answers from " + llm.model : "No language model connected"}`;
+    const om = llm.omniroute || {};
+    const model = om.state === "starting" ? "Starting OmniRoute for you" : om.state === "failed" ? `Language model unavailable: ${om.detail}`
+      : llm.connected ? "Answers from " + llm.model : "No language model connected";
+    s.textContent = `${where}. ${model}`;
     s.className = "status ok";
+    if (om.state === "starting") setTimeout(health, 2000);
   } catch {
     s.textContent = STATIC ? "Loading the 23 MB router into your browser" : "Router offline. Check that the Jarvis app is running.";
     s.className = "status bad";
@@ -162,14 +166,38 @@ store.get("reminders", []).forEach(schedule);
 renderSaved();
 
 /* ---------- speech out ---------- */
-function speak(t) {
-  if (!$("#speak").checked || !("speechSynthesis" in window)) return;
+// Prefer the natural-sounding voices the browser offers (Edge ships "Online (Natural)" ones), let the person override.
+const voiceRank = (v) => (/natural|neural/i.test(v.name) ? 4 : 0) + (/online/i.test(v.name) ? 2 : 0) + (/google/i.test(v.name) ? 1 : 0);
+function fillVoices() {
+  if (!("speechSynthesis" in window)) return;
+  const lang = (navigator.language || "en-US").slice(0, 2).toLowerCase();
+  const vs = speechSynthesis.getVoices().filter((v) => v.lang.toLowerCase().startsWith(lang)).sort((a, b) => voiceRank(b) - voiceRank(a));
+  const want = store.get("voice", "");
+  $("#voice").innerHTML = "";
+  for (const v of vs) {
+    const o = document.createElement("option");
+    o.value = v.name; o.textContent = `${v.name} (${v.lang})`;
+    $("#voice").append(o);
+  }
+  if (vs.some((v) => v.name === want)) $("#voice").value = want;
+}
+function chosenVoice() { return speechSynthesis.getVoices().find((v) => v.name === $("#voice").value) || null; }
+function speak(t, force = false) {
+  if ((!force && !$("#speak").checked) || !("speechSynthesis" in window)) return;
   speechSynthesis.cancel();
   const u = new SpeechSynthesisUtterance(t);
+  const v = chosenVoice();
+  if (v) { u.voice = v; u.lang = v.lang; }
+  u.rate = Number($("#rate").value) || 1;
   u.onstart = () => setState("speaking");
   u.onend = u.onerror = () => setState("idle");
   speechSynthesis.speak(u);
 }
+if ("speechSynthesis" in window) { fillVoices(); speechSynthesis.onvoiceschanged = fillVoices; }
+$("#voice").addEventListener("change", (e) => store.set("voice", e.target.value));
+$("#rate").value = store.get("rate", 1);
+$("#rate").addEventListener("change", (e) => store.set("rate", Number(e.target.value)));
+$("#hear").addEventListener("click", () => speak("Hello. This is how I sound.", true));
 $("#speak").checked = store.get("speak", false);
 $("#speak").addEventListener("change", (e) => store.set("speak", e.target.checked));
 $("#city").value = store.get("city", "");
@@ -273,3 +301,20 @@ if (!SR) {
    cannot save notes, set reminders or spend LLM calls on its own. */
 const preset = new URLSearchParams(location.search).get("say");
 if (preset) $("#text").value = preset.slice(0, 300);
+
+/* ---------- bring your own key: only on the hosted copy ---------- */
+if (STATIC) {
+  $("#byok").hidden = false;
+  for (const [id, p] of Object.entries(PROVIDERS)) $("#byok-provider").append(new Option(p.label, id));
+  const cur = byok.get();
+  if (cur) { $("#byok-provider").value = cur.provider; $("#byok-model").value = cur.model; $("#byok-msg").textContent = "A key is saved in this browser."; }
+  $("#byok-save").addEventListener("click", () => {
+    const provider = $("#byok-provider").value, model = $("#byok-model").value.trim(), key = $("#byok-key").value.trim();
+    if (!model || !key) { $("#byok-msg").textContent = "Enter a model id and a key."; return; }
+    byok.set({ provider, model, key }, $("#byok-remember").checked);
+    $("#byok-key").value = "";
+    $("#byok-msg").textContent = $("#byok-remember").checked ? "Saved on this device." : "Saved for this tab only.";
+    health();
+  });
+  $("#byok-forget").addEventListener("click", () => { byok.clear(); $("#byok-model").value = ""; $("#byok-msg").textContent = "Key removed."; health(); });
+}
