@@ -249,6 +249,9 @@ export const PROVIDERS = {
   cerebras: { label: "Cerebras", url: "https://api.cerebras.ai/v1/chat/completions" },
 };
 const DAILY_CAP = 100;
+// An earlier version saved the key in localStorage, which other pages on this shared origin can read.
+// Remove any such copy as soon as this file loads, before anyone interacts with the page.
+try { localStorage.removeItem("jarvis.byok"); } catch { /* storage blocked */ }
 export const byok = {
   // Kept for this tab only (sessionStorage). The site shares its origin (brej-29.github.io) with other pages,
   // so nothing about the key is written to storage that outlives the tab.
