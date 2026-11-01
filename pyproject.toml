@@ -1,0 +1,36 @@
+[project]
+name = "jarvis"
+version = "2.0.0"
+description = "A local voice assistant router that knows when not to act"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+  "fastapi>=0.110,<1",
+  "uvicorn>=0.27,<1",
+  "httpx>=0.26,<1",
+  "numpy>=1.26,<3",
+  "onnxruntime>=1.18,<2",
+  "tokenizers>=0.19,<1",
+  "dateparser>=1.2,<2",
+]
+
+[project.optional-dependencies]
+train = ["torch", "transformers>=4.40,<5", "onnx>=1.16", "onnxscript", "scikit-learn>=1.4", "pandas", "pyarrow"]
+eval = ["scikit-learn>=1.4", "pandas", "pyarrow", "llama-cpp-python", "faster-whisper>=1.0", "soundfile", "jiwer", "huggingface_hub"]
+dev = ["pytest>=8", "ruff>=0.4", "pyinstaller>=6"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["jarvis*"]
+
+[tool.setuptools.package-data]
+"jarvis.legacy" = ["*.txt"]

@@ -1,0 +1,21 @@
+# Jarvis Voice Agent – Product Goal and Scope
+
+## Product Goal
+
+Build a **push-to-talk, Jarvis-style voice assistant** that:
+- Feels responsive and low-latency for short, conversational queries.
+- Runs **free-first**: on-device STT/TTS and a **local Ollama LLM backend**.
+- Works reliably in **offline / constrained environments** (no hard dependency on cloud APIs).
+- Is easy to extend with new skills (e.g., weather, reminders) and cross-device sync later.
+
+The assistant should feel like a persistent companion that understands short-term context within a session and can be expanded into a broader “personal console” for the user.
+
+---
+
+## V1 Scope (This Repo)
+
+**Primary user journey**
+
+1. User holds/taps a mic button in the Flutter app.
+2. On-device STT converts speech → text.
+3. Text
