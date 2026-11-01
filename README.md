@@ -4,8 +4,8 @@
 
 A local voice assistant router. It reads what you said, picks one of five outcomes (weather, reminder, note, answer, or "I cannot do that") in about 2 ms on one CPU thread, and says plainly when it has no tool for a request.
 
-**Live demo:** LIVE_URL_PLACEHOLDER (free host, sleeps when idle, see [limits](#free-hosting-and-limits)).
-**Windows app:** a single `jarvis.exe` that runs the same thing offline (see [Run it](#run-it)).
+**Live demo:** https://brej-29.github.io/jarvis-voice-agent/ (free, no server: the router runs in your browser, see [limits](#free-hosting-and-limits)).
+**Windows app:** `jarvis.exe` from the [latest release](https://github.com/brej-29/jarvis-voice-agent/releases/latest) runs the same app offline on your machine, no Python needed (see [Run it](#run-it)).
 
 ![Decision slips: what was heard, which tool, how sure, what happened](docs/images/talk.png)
 
@@ -143,7 +143,7 @@ set JARVIS_LLM_MODEL=qwen2.5:1.5b
 set JARVIS_LLM_API_KEY=...        # only if the endpoint needs one
 ```
 
-**Windows exe:** `make exe` builds `dist/jarvis.exe` with PyInstaller (UI and model inside, no Python needed).
+**Windows exe:** download `jarvis.exe` from the latest release, or `make exe` to build `dist/jarvis.exe` with PyInstaller (UI and model inside, no Python needed). It opens your browser on `http://127.0.0.1:8765`. Windows SmartScreen may warn because the file is unsigned.
 
 ## Reproduce
 
@@ -159,9 +159,13 @@ Data is downloaded by the scripts: MASSIVE from Amazon's S3 bucket, SLURP record
 
 ## Free hosting and limits
 
-- **Live demo** runs on a free Hugging Face Space (CPU Basic: 2 vCPU, 16 GB). It sleeps after a period of inactivity and takes up to a minute to wake, which the UI says out loud. The router has no state, so nothing is lost when it sleeps. Reminders and notes live in your browser.
-- The demo has no language model attached, so "general questions" explain how to connect one. Weather uses Open-Meteo (free, no key, fair-use limits).
-- Free-tier terms change. Nothing here depends on a paid service, and every endpoint and model id is configuration.
+- **Live demo** is a static site on GitHub Pages, rebuilt from `main` by `.github/workflows/pages.yml`. There is no server, so there is no cold start and nothing to sleep. The same 23 MB int8 model runs in your browser through onnxruntime-web (WASM). Routing takes about 30 ms there, and the browser router agrees with the Python router on the tool for all 604 requests I compared (confidence differs by up to 0.05 because the int8 kernels differ).
+- First visit downloads the model (23 MB) and the onnxruntime WASM runtime from the jsDelivr CDN, so the first request waits a few seconds. The page says so while it loads.
+- Weather calls go from your browser to Open-Meteo (free, no key, fair-use limits). Reminders and notes stay in your browser's storage.
+- The hosted copy has no language model, so "general questions" explain how to connect one. Run it locally for that.
+- Voice input uses the browser's own speech recognition (Chrome or Edge). Typing works anywhere.
+- GitHub Pages limits (1 GB site, soft bandwidth cap) are far above this site's size. Hugging Face Docker Spaces were the first plan, but the free CPU tier now requires a PRO subscription, so I did not use it.
+- Nothing here depends on a paid service, and every endpoint and model id is configuration.
 
 ## Limits
 
@@ -186,3 +190,5 @@ MASSIVE is CC BY 4.0 (FitzGerald et al., 2022, Amazon). SLURP text is CC BY 4.0;
 | `bench/` | `results/` (every number), `summarize.py`, V1 bug reproduction |
 | `docs/` | `PREREG.md`, `ARCHITECTURE.md` |
 | `models/joint/` | The shipped int8 model |
+| `packaging/` | PyInstaller spec and the GitHub Pages site builder |
+| `Dockerfile` | Container for self-hosting the server version |

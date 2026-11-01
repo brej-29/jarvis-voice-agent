@@ -49,3 +49,11 @@ def test_spoken_times_parse():
     for when, hhmm in cases.items():
         _reply, action = tools.reminder(when, "x", tz_offset_min=0, now=now)
         assert action and action["at"][11:16] == hhmm, (when, action)
+
+
+def test_static_hints_match_python():
+    import json
+    from pathlib import Path
+
+    hints = json.loads((Path(__file__).parents[1] / "jarvis" / "web" / "hints.json").read_text(encoding="utf-8"))
+    assert hints == tools.UNSUPPORTED_HINT
