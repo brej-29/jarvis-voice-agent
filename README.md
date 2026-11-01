@@ -160,7 +160,7 @@ Data is downloaded by the scripts: MASSIVE from Amazon's S3 bucket, SLURP record
 ## Free hosting and limits
 
 - **Live demo** is a static site on GitHub Pages, rebuilt from `main` by `.github/workflows/pages.yml`. There is no server, so there is no cold start and nothing to sleep. The same 23 MB int8 model runs in your browser through onnxruntime-web (WASM). Routing takes about 30 ms there, and the browser router agrees with the Python router on the tool for all 604 requests I compared (confidence differs by up to 0.05 because the int8 kernels differ).
-- First visit downloads the model (23 MB) and the onnxruntime WASM runtime from the jsDelivr CDN, so the first request waits a few seconds. The page says so while it loads.
+- First visit downloads the model (23 MB) and the onnxruntime WASM runtime (11 MB), both from the same site, so the first request waits a few seconds. The page says so while it loads. The page loads no third-party scripts: onnxruntime-web is fetched at build time from a pinned release and checked against a SHA-256 hash (`packaging/vendor.json`), chrono-node is vendored, and a Content-Security-Policy limits connections to the site and Open-Meteo.
 - Weather calls go from your browser to Open-Meteo (free, no key, fair-use limits). Reminders and notes stay in your browser's storage.
 - The hosted copy has no language model, so "general questions" explain how to connect one. Run it locally for that.
 - Voice input uses the browser's own speech recognition (Chrome or Edge). Typing works anywhere.

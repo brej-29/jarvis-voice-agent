@@ -140,6 +140,9 @@ def unsupported(intent: str) -> str:
     return heard + "I can check the weather, set reminders and save notes."
 
 
+GREETING = "Hello. I can check the weather, set reminders and save notes. What do you need?"
+
+
 async def answer(text: str, history: list[dict] | None = None) -> str:
     """General Q&A through any OpenAI-compatible endpoint (OmniRoute, Ollama /v1, llama.cpp server)."""
     base, model = os.getenv("JARVIS_LLM_BASE_URL"), os.getenv("JARVIS_LLM_MODEL")

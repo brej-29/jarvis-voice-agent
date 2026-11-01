@@ -3,8 +3,9 @@
    Static mode (GitHub Pages, window.JARVIS_STATIC): runs the same int8 ONNX router in the browser. */
 export const STATIC = !!window.JARVIS_STATIC;
 
-const ORT = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/";
-const CHRONO = "https://cdn.jsdelivr.net/npm/chrono-node@2.7.7/+esm";
+// third-party code is vendored (see packaging/build_pages.py), so the page loads nothing from other origins
+const ORT = new URL("vendor/ort/", document.baseURI).href;
+const CHRONO = "./vendor/chrono.js";
 const MODEL = "model/";
 
 export async function health() {
@@ -165,6 +166,7 @@ export function reminderTitle(text, when) {
   return words.join(" ");
 }
 
+const GREETING = "Hello. I can check the weather, set reminders and save notes. What do you need?";
 let chronoP;
 async function act(r, body) {
   if (r.tool === "WEATHER") return weather(r.args.city || body.default_city);
@@ -174,6 +176,7 @@ async function act(r, body) {
     return reminder(when, derived && (!r.args.title || derived.includes(r.args.title)) ? derived : r.args.title || "");
   }
   if (r.tool === "SAVE_NOTE") return { reply: "Saved your note.", action: { type: "note", text: body.text } };
+  if (r.tool === "GENERAL_QA" && r.intent === "general_greet") return { reply: GREETING, action: null };
   if (r.tool === "GENERAL_QA") return { reply: "General questions need a language model. This hosted copy runs entirely in your browser and has none. Run Jarvis locally and connect one, or ask for the weather, a reminder or a note.", action: null };
   const hints = await (hintsP ||= fetch("hints.json").then((x) => x.json()).catch(() => ({})));
   const hint = hints[r.intent];
