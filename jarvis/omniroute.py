@@ -12,6 +12,7 @@ closing the console window or killing jarvis.exe, so it cannot be left behind by
 """
 
 import atexit
+import logging
 import os
 import shutil
 import subprocess
@@ -22,6 +23,7 @@ from urllib.parse import urlparse
 
 import httpx
 
+log = logging.getLogger("jarvis.omniroute")
 LOCAL = {"localhost", "127.0.0.1", "::1", "[::1]"}
 READY_TIMEOUT_S = float(os.getenv("OMNIROUTE_READY_TIMEOUT_S", "90"))
 
@@ -87,7 +89,15 @@ class OmniRoute:
 
     @staticmethod
     def executable() -> str | None:
-        return os.getenv("OMNIROUTE_BIN") or shutil.which("omniroute")
+        """Find omniroute on PATH without ever picking up a copy from the current directory."""
+        explicit = os.getenv("OMNIROUTE_BIN")
+        if explicit:
+            return explicit if os.path.isabs(explicit) and os.path.isfile(explicit) else None
+        cwd = os.path.normcase(os.path.realpath(os.getcwd()))
+        dirs = [d for d in os.environ.get("PATH", "").split(os.pathsep)
+                if d and d != "." and os.path.isabs(d) and os.path.normcase(os.path.realpath(d)) != cwd]
+        found = shutil.which("omniroute", path=os.pathsep.join(dirs))
+        return found if found and os.path.isabs(found) else None
 
     # ---- lifecycle ----
     def ensure(self, endpoint: str) -> None:
@@ -101,17 +111,17 @@ class OmniRoute:
             return
         host, port, base = target
         if host not in LOCAL:
-            self.state, self.detail = "remote", host
+            self.state, self.detail = "remote", ""
             return
         if self.healthy(base):
-            self.state, self.detail = "external", f"already running on port {port}"
+            self.state, self.detail = "external", "already running"
             return
         exe = self.executable()
         if not exe:
-            self.state, self.detail = "failed", "OmniRoute is not installed (npm install -g omniroute)"
+            self.state, self.detail = "failed", "OmniRoute is not installed"
             return
         with self._lock:
-            self.state, self.detail = "starting", f"launching OmniRoute on port {port}"
+            self.state, self.detail = "starting", "launching"
             cmd = [exe, "serve", "--no-open", "--no-tray", "--port", str(port)]
             flags = (subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP) if os.name == "nt" else 0
             try:
@@ -119,19 +129,21 @@ class OmniRoute:
                                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                                              creationflags=flags, start_new_session=os.name != "nt")
             except OSError as exc:
-                self.state, self.detail = "failed", f"could not start OmniRoute: {exc}"
+                log.warning("could not start OmniRoute: %s", exc)
+                self.state, self.detail = "failed", "could not start OmniRoute"
                 return
             self._job = _kill_on_close_job(self.proc)
         deadline = time.monotonic() + READY_TIMEOUT_S
         while time.monotonic() < deadline:
             if self.proc.poll() is not None:
-                self.state, self.detail = "failed", f"OmniRoute exited with code {self.proc.returncode}"
+                log.warning("OmniRoute exited with code %s", self.proc.returncode)
+                self.state, self.detail = "failed", "OmniRoute stopped unexpectedly"
                 return
             if self.healthy(base):
-                self.state, self.detail = "started", f"started by Jarvis on port {port}"
+                self.state, self.detail = "started", "started by Jarvis"
                 return
             time.sleep(1)
-        self.state, self.detail = "failed", f"OmniRoute did not answer within {int(READY_TIMEOUT_S)} s"
+        self.state, self.detail = "failed", "OmniRoute did not answer in time"
         self.stop()
 
     def stop(self) -> None:
@@ -141,7 +153,7 @@ class OmniRoute:
         if not p or p.poll() is not None:
             return
         if os.name == "nt":
-            subprocess.run(["taskkill", "/PID", str(p.pid), "/T", "/F"], capture_output=True, check=False)
+            self._terminate_windows(p)
         else:
             import signal
 
@@ -155,6 +167,19 @@ class OmniRoute:
             p.kill()
         if self.state in ("started", "starting"):
             self.state, self.detail = "off", "stopped"
+
+    def _terminate_windows(self, p: subprocess.Popen) -> None:
+        """Kill the child and everything it started: the job object if there is one, else taskkill by full path."""
+        import ctypes
+        from ctypes import wintypes
+
+        if self._job:
+            kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel.TerminateJobObject.argtypes = [wintypes.HANDLE, wintypes.UINT]
+            if kernel.TerminateJobObject(self._job, 1):
+                return
+        system = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "taskkill.exe")
+        subprocess.run([system, "/PID", str(p.pid), "/T", "/F"], capture_output=True, check=False)
 
     def ensure_in_background(self, endpoint: str) -> None:
         threading.Thread(target=self.ensure, args=(endpoint,), name="omniroute", daemon=True).start()
