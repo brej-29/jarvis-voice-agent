@@ -17,3 +17,19 @@ def test_routes_and_declines():
 def test_foreign_host_rejected():
     with TestClient(app, base_url="http://evil.example") as c:
         assert c.get("/api/health").status_code == 400
+
+
+def test_stream_sends_route_first_then_tokens(monkeypatch):
+    from jarvis import llm
+
+    async def fake(text, history=None, client=None):
+        for piece in ("Leonardo", " da Vinci."):
+            yield piece
+
+    monkeypatch.setattr(llm, "stream_answer", fake)
+    with TestClient(app) as c:
+        body = c.post("/api/chat/stream", json={"text": "who painted the mona lisa"}).text
+        assert body.index("event: route") < body.index("event: token")
+        assert body.count("event: token") == 2 and "Leonardo da Vinci." in body.split("event: done")[1]
+        decline = c.post("/api/chat/stream", json={"text": "play some jazz in the kitchen"}).text
+        assert "event: token" not in decline and "I cannot do" in decline
