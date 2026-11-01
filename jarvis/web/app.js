@@ -41,12 +41,19 @@ health();
 function esc(t) { return t.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
 
 function markSpans(text, spans) {
-  let html = esc(text);
+  // find each span in the raw text, then escape piece by piece so inserted markup is never searched
+  const lower = text.toLowerCase(), hits = [];
   for (const sp of spans || []) {
-    const re = new RegExp("\\b" + sp.text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\b", "i");
-    html = html.replace(re, (m) => `<mark class="s-${sp.kind}">${m}</mark>`);
+    const i = lower.indexOf(sp.text.toLowerCase());
+    if (i >= 0 && !hits.some((h) => i < h.end && i + sp.text.length > h.start)) hits.push({ start: i, end: i + sp.text.length, kind: sp.kind });
   }
-  return html;
+  hits.sort((a, b) => a.start - b.start);
+  let out = "", at = 0;
+  for (const h of hits) {
+    out += esc(text.slice(at, h.start)) + `<mark class="s-${h.kind}">${esc(text.slice(h.start, h.end))}</mark>`;
+    at = h.end;
+  }
+  return out + esc(text.slice(at));
 }
 
 function addSlip(text, data, pending) {

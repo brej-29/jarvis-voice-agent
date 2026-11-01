@@ -44,6 +44,13 @@ UNSUPPORTED_HINT = {
 
 
 async def weather(city: str, client: httpx.AsyncClient | None = None) -> tuple[str, dict | None]:
+    try:
+        return await _weather(city, client)
+    except (httpx.HTTPError, KeyError, ValueError):
+        return "I could not reach the weather service. Try again in a moment.", None
+
+
+async def _weather(city: str, client: httpx.AsyncClient | None) -> tuple[str, dict | None]:
     if not city:
         return "Which city should I check the weather for?", None
     async with (client or httpx.AsyncClient(timeout=8)) as c:
@@ -146,9 +153,11 @@ async def answer(text: str, history: list[dict] | None = None) -> str:
     past = [{"role": h["role"], "content": str(h.get("content", ""))[:500]} for h in (history or [])[-6:]
             if isinstance(h, dict) and h.get("role") in ("user", "assistant")]
     msgs += past + [{"role": "user", "content": text}]
-    async with httpx.AsyncClient(timeout=30) as c:
-        r = await c.post(base.rstrip("/") + "/chat/completions", headers=headers,
-                         json={"model": model, "messages": msgs, "max_tokens": 120, "temperature": 0.3})
-    if r.status_code != 200:
+    try:
+        async with httpx.AsyncClient(timeout=30) as c:
+            r = await c.post(base.rstrip("/") + "/chat/completions", headers=headers,
+                             json={"model": model, "messages": msgs, "max_tokens": 120, "temperature": 0.3})
+        r.raise_for_status()
+        return r.json()["choices"][0]["message"]["content"].strip()
+    except (httpx.HTTPError, KeyError, IndexError, ValueError):
         return "My language model did not answer. Try again in a moment."
-    return r.json()["choices"][0]["message"]["content"].strip()

@@ -167,6 +167,9 @@ Data is downloaded by the scripts: MASSIVE from Amazon's S3 bucket, SLURP record
 
 - The tool mapping is a proxy: reminders come from MASSIVE's alarm and calendar requests, notes from list requests. Notes were taught with synthetic phrasings and are not measured on real data.
 - Speech results use Whisper (int8, English) on 494 clips from one corpus. Browser speech recognition, which the app actually uses, was not benchmarked.
+- Only the three action tools are gated by the confidence threshold. A garbled request that the model guesses is a general question still goes to the language model, if one is connected.
+- Cascade fallback is set to a 15% dev quantile of confidence, which is near 0.99 because the model is very sure most of the time, so the real fallback rate on test differs from 15%.
+- A few ASR training transcripts (sentences that also got a wake-word variant) were dropped when tags were aligned, so the speech training set is slightly smaller than the 6,600 rows quoted.
 - English only. One laptop (i5-13450HX, RTX 3050 6 GB). Latency is router time only.
 - Time arguments are right 85% of the time given the right tool. I did not break the failures down further.
 
